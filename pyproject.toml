@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69.5", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onnx_quantize"
+version = "0.1.0"
+description = "ONNX Quantization Framework"
+authors = [{ name = "Ayoub Bih", email = "ayoubbih119@gmail.com" }]
+requires-python = ">=3.10"
+
+dependencies = ["onnxscript", "onnxruntime"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+# ---------------- Ruff ----------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+
+# Rule “bundles” to run (E=pycodestyle errors, F=pyflakes, I=isort, D=docstring‑convention,  
+# UP=pyupgrade, B=bugbear, C4=flake8‑comprehensions)
+select = ["E", "F", "I", "D", "UP", "B", "C4"]
+per-file-ignores = { "__init__.py" = ["F401", "F403"], "test/onnx_quantize/*" = ["D"]}
+
+ignore = [
+  "D100",  # Missing module docstring
+  "D102",  # Missing function docstring
+  "D104",  # Missing public package docstring
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = false
+lines-after-imports = 2
+known-first-party = ["onnx_quantize"]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
