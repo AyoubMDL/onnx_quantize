@@ -2,9 +2,8 @@ import numpy as np
 import onnx
 import onnxruntime
 import pytest
-from onnxruntime.quantization import QuantType
 
-from onnx_quantize import QConfig, quantize
+from onnx_quantize import QConfig, QuantType, quantize
 
 
 def _get_test_model():

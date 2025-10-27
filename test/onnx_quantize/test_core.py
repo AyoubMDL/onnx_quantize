@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from onnxruntime.quantization import QuantType
 
+from onnx_quantize import QuantType
 from onnx_quantize.core import (
     QUANT_TYPE_TO_NP_DTYPE,
     get_quantization_params,

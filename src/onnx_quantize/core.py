@@ -1,7 +1,14 @@
 import dataclasses
+from enum import Enum
 
 import numpy as np
-from onnxruntime.quantization import QuantType
+
+
+class QuantType(Enum):
+    """Enumeration of quantization types."""
+
+    QInt8 = 0
+    QUInt8 = 1
 
 
 QUANT_TYPE_TO_NP_DTYPE = {
