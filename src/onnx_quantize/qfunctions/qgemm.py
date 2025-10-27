@@ -1,4 +1,4 @@
-import onnx
+import onnx_ir as ir
 from onnxscript import opset20 as op
 from onnxscript import script
 
@@ -27,9 +27,9 @@ def QGemmStatic8bits(X, W, B, x_scale, w_scale, x_zero_point, w_zero_point):
 def _quantize_bias(B, x_scale, w_scale):
     bias_scale = op.Mul(x_scale, w_scale)
     q_bias = op.Div(B, bias_scale)
-    min_ = op.Cast(-(2**31), to=onnx.TensorProto.INT32)
-    max_ = op.Cast(2 ** (31) - 1, to=onnx.TensorProto.INT32)
-    q_bias = op.Cast(q_bias, to=onnx.TensorProto.INT32)
+    min_ = op.Cast(-(2**31), to=ir.DataType.INT32)
+    max_ = op.Cast(2 ** (31) - 1, to=ir.DataType.INT32)
+    q_bias = op.Cast(q_bias, to=ir.DataType.INT32)
     q_bias = op.Clip(q_bias, min_, max_)
     return q_bias
 
