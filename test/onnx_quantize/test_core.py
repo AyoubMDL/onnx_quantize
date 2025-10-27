@@ -6,6 +6,7 @@ from onnx_quantize.core import (
     QUANT_TYPE_TO_NP_DTYPE,
     get_quantization_params,
     get_quantized_range,
+    quantize_bias,
     quantize_tensor,
 )
 
@@ -116,3 +117,18 @@ def test_quantize_tensor_shapes_and_ranges(fp_tensor, quant_type, symmetric):
     assert scale >= 0
 
     assert zero_point == 0 if symmetric else True
+
+
+def test_quantize_bias(rng):
+    bias = rng.random((16,)).astype(np.float32)
+    input_scale = 1.5
+    weight_scale = rng.random((16,)).astype(np.float32)
+    q_bias, scale, zero_point = quantize_bias(bias, input_scale, weight_scale)
+
+    # Shape must match input
+    assert q_bias.shape == bias.shape
+    np.testing.assert_array_equal(scale, input_scale * weight_scale)
+
+    # dtype must match quant_type
+    assert q_bias.dtype == np.int32
+    assert zero_point == 0

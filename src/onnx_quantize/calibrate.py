@@ -5,7 +5,7 @@ import onnxruntime
 from onnx_quantize.core import QConfig, get_quantization_params
 
 
-OP_TYPES_TO_QUANTIZE = {"MatMul"}
+OP_TYPES_TO_QUANTIZE = {"MatMul", "Gemm"}
 
 
 def get_nodes_to_quantize(ir_model, op_types_to_calibrate):

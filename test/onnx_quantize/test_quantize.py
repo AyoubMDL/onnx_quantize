@@ -6,7 +6,7 @@ import pytest
 from onnx_quantize import QConfig, QuantType, quantize
 
 
-def _get_test_model():
+def _get_matmul_model():
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -23,6 +23,29 @@ def _get_test_model():
     return model
 
 
+def _get_gemm_model():
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 20] >
+                test_model (float[N, 32] X) => (float [N, ?] Y)
+                <float[64, 32] W1, float[64] B1, float[64, 128] W2>
+                {
+                    x1 = Gemm<transB=1>(X, W1, B1)
+                    x2 = Relu(x1)
+                    Y = Gemm(x2, W2)
+                }
+            """)
+    W1 = onnx.numpy_helper.from_array(np.random.randn(64, 32).astype(np.float32), name="W1")
+    B1 = onnx.numpy_helper.from_array(
+        np.random.randn(
+            64,
+        ).astype(np.float32),
+        name="B1",
+    )
+    W2 = onnx.numpy_helper.from_array(np.random.randn(64, 128).astype(np.float32), name="W2")
+    model.graph.initializer.extend([W1, B1, W2])
+    return model
+
+
 @pytest.mark.parametrize(
     "is_static, activations_dtype, activations_symmetric, weights_dtype, "
     "weights_symmetric, weights_per_channel",
@@ -33,7 +56,9 @@ def _get_test_model():
         (False, QuantType.QUInt8, False, QuantType.QUInt8, False, False),
     ],
 )
+@pytest.mark.parametrize("model", [_get_matmul_model(), _get_gemm_model()])
 def test_quantize(
+    model,
     is_static,
     activations_dtype,
     activations_symmetric,
@@ -49,7 +74,7 @@ def test_quantize(
         weights_symmetric=weights_symmetric,
         weights_per_channel=weights_per_channel,
     )
-    qmodel = quantize(_get_test_model(), qconfig)
+    qmodel = quantize(model, qconfig)
 
     # Check inference
     qsession = onnxruntime.InferenceSession(qmodel.SerializeToString())
