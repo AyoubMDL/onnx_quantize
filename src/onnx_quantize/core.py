@@ -1,12 +1,21 @@
 import dataclasses
+import enum
 
 import numpy as np
-from onnxruntime.quantization import QuantType
+
+
+class QuantType(enum.Enum):
+    """Enumeration of quantization types."""
+
+    QInt8 = 0
+    QUInt8 = 1
+    QInt32 = 2
 
 
 QUANT_TYPE_TO_NP_DTYPE = {
     QuantType.QInt8: np.int8,
     QuantType.QUInt8: np.uint8,
+    QuantType.QInt32: np.int32,
 }
 
 _SIGNED_QUANT_TYPES = {QuantType.QInt8}
@@ -118,6 +127,17 @@ def get_quantization_params(fp_tensor, quant_type, is_symmetric, per_channel):
     return _get_quantization_params_asymmetric(fp_tensor, quant_type, axis)
 
 
+def _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point):
+    fp_tensor_scaled = fp_tensor / scale
+    shifted_tensor = np.round(fp_tensor_scaled).astype(np.int32) + zero_point
+
+    quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric)
+    q_tensor = np.clip(shifted_tensor, quantized_min, quantized_max)
+    q_tensor = q_tensor.astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
+
+    return q_tensor
+
+
 def quantize_tensor(fp_tensor, quant_type=QuantType.QInt8, is_symmetric=False, per_channel=False):
     """Quantizes a tensor using asymmetric quantization.
 
@@ -132,17 +152,29 @@ def quantize_tensor(fp_tensor, quant_type=QuantType.QInt8, is_symmetric=False, p
         tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
     """
     scale, zero_point = get_quantization_params(fp_tensor, quant_type, is_symmetric, per_channel)
-
-    # Linear quantization
-    # if np.size(scale) != 1:
-    #     scale = scale[:, None]
-    #     zero_point = zero_point[:, None]
-
-    fp_tensor_scaled = fp_tensor / scale
-    shifted_tensor = np.round(fp_tensor_scaled).astype(np.int32) + zero_point
-
-    quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric)
-    q_tensor = np.clip(shifted_tensor, quantized_min, quantized_max)
-    q_tensor = q_tensor.astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
-
+    q_tensor = _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point)
     return q_tensor, scale, zero_point
+
+
+def quantize_bias(bias, input_scale, weight_scale):
+    """Linear quantization for single bias tensor quantized_bias = fp_bias / bias_scale.
+
+    Args:
+        bias (np.ndarray): bias weight to be quantized
+        weight_scale: [float or torch.FloatTensor] weight scale tensor
+        input_scale: [float] input scale
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
+    """
+    assert bias.ndim == 1
+    assert bias.dtype == np.float32
+    assert np.size(input_scale) == 1
+    assert weight_scale.dtype == np.float32
+    assert weight_scale.size == 1 or bias.size == weight_scale.size
+
+    bias_scale = weight_scale * input_scale
+    qbias = _linear_quantize(
+        bias, QuantType.QInt32, is_symmetric=False, scale=bias_scale, zero_point=0
+    )
+    return qbias, bias_scale, 0

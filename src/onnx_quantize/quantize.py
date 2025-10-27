@@ -6,6 +6,7 @@ import onnxscript
 
 from onnx_quantize.calibrate import OP_TYPES_TO_QUANTIZE, calibrate_model, get_nodes_to_quantize
 from onnx_quantize.core import QConfig
+from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import qfunctions
 from onnx_quantize.qrules import qrules
 
@@ -31,6 +32,9 @@ def quantize(model: onnx.ModelProto, qconfig: QConfig) -> onnx.ModelProto:
     """
     # Convert to IR model
     ir_model = ir.from_proto(model)
+
+    # Run pre rules quant
+    ir_model = onnxscript.rewriter.rewrite(ir_model, pre_rules)
 
     # Calibrate the model to compute quantization parameters
     if qconfig.is_static:

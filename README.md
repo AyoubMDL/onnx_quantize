@@ -20,8 +20,7 @@ pip install onnx-quantize
 
 Here’s a minimal example to quantize an ONNX model:
 ```python
-from onnx_quantize import QConfig, quantize
-from onnxruntime.quantization import QuantType
+from onnx_quantize import QConfig, QuantType, quantize 
 import onnx
 
 # Load your model
