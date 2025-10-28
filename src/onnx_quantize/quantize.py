@@ -4,7 +4,8 @@ import onnx
 import onnx_ir as ir
 import onnxscript
 
-from onnx_quantize.calibrate import OP_TYPES_TO_QUANTIZE, calibrate_model, get_nodes_to_quantize
+from onnx_quantize import OP_TYPES_TO_QUANTIZE
+from onnx_quantize.calibrate import calibrate_model, get_nodes_to_quantize
 from onnx_quantize.core import QConfig
 from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import qfunctions
