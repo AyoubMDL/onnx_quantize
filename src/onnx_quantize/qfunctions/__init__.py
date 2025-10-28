@@ -2,7 +2,7 @@ import onnx_ir as ir
 
 from onnx_quantize.qfunctions.qgemm import *
 from onnx_quantize.qfunctions.qmatmul import *
-from onnx_quantize.qfunctions.register import _QFUNCTIONS, register_qfunction
+from onnx_quantize.qfunctions.register import _QFUNCTIONS, OP_TYPES_TO_QUANTIZE
 
 
 def _get_functions():

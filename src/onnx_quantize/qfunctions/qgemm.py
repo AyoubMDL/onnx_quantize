@@ -5,7 +5,7 @@ from onnxscript import script
 from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
 
 
-@register_qfunction
+@register_qfunction(target_optype="Gemm")
 @script(opset=QUANT_OPSET)
 def QGemmStatic8bits(X, W, B, x_scale, w_scale, x_zero_point, w_zero_point):
     """Static Quantized Gemm using ONNX ops."""
@@ -34,7 +34,7 @@ def _quantize_bias(B, x_scale, w_scale):
     return q_bias
 
 
-@register_qfunction
+@register_qfunction(target_optype="Gemm")
 @script(opset=QUANT_OPSET)
 def QGemmDynamic8bits(X, W, B, w_scale, w_zero_point):
     """Dynamic Quantized Gemm using ONNX ops."""
