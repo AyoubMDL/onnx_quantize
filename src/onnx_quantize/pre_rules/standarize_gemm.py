@@ -41,8 +41,9 @@ class StandarizeGemmBias(StandarizeGemm):
         return op.Gemm(x, w, b, _outputs=["out"])
 
     def rewrite(self, op, x, w, b, **_):
-        w_t = op.initializer(ir.tensor(w.const_value.numpy().T), name=w.name)
-        return op.Gemm(x, w_t, b, transB=0)
+        if self.transB:
+            w = op.initializer(ir.tensor(w.const_value.numpy().T), name=w.name)
+        return op.Gemm(x, w, b, transB=0)
 
 
 standarize_gemm_rules = [StandarizeGemmBias().rule(), StandarizeGemm().rule()]
