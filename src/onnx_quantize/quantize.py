@@ -3,7 +3,6 @@ import dataclasses
 import onnx
 import onnx_ir as ir
 import onnxscript
-from onnx_ir.passes.common import shape_inference
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE
 from onnx_quantize.calibrate import calibrate_model, get_nodes_to_quantize
@@ -35,9 +34,8 @@ def quantize(model: onnx.ModelProto, qconfig: QConfig) -> onnx.ModelProto:
     # Convert to IR model
     ir_model = ir.from_proto(model)
 
-    # Run shape inference (Required for some pre_rules)
-    # TODO: Maybe replace this with optimize
-    ir_model = shape_inference.infer_shapes(ir_model)
+    # Optimize model before quantization
+    ir_model = onnxscript.optimizer.optimize(ir_model)
 
     # Run pre rules quant
     ir_model = onnxscript.rewriter.rewrite(ir_model, pre_rules)
