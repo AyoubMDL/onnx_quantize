@@ -11,7 +11,8 @@ from onnx_quantize.quantize import _add_qconfig_to_nodes
 
 
 @pytest.mark.parametrize("is_static", [True, False])
-def test_gemm_to_qgemm(is_static):
+@pytest.mark.parametrize("weights_only", [True, False])
+def test_gemm_to_qgemm(is_static, weights_only):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -29,15 +30,25 @@ def test_gemm_to_qgemm(is_static):
     model = ir.from_proto(model)
     clone = ir.from_proto(ir.to_proto(model))
 
-    qconfig = QConfig(is_static=is_static, weights_dtype=QuantType.QUInt8)
+    qconfig = QConfig(
+        is_static=is_static, weights_only=weights_only, weights_dtype=QuantType.QUInt8
+    )
 
-    if is_static:
+    if is_static and not weights_only:
         model = calibrate_model(model, qconfig)
 
     _add_qconfig_to_nodes(model, qconfig)
     model = onnxscript.rewriter.rewrite(model, gemm_to_qgemm_rules)
 
-    if is_static:
+    if weights_only:
+        for org_node, node in zip(clone.graph, model.graph, strict=True):
+            # Check for bias
+            if len(org_node.inputs) == 3:
+                assert node.op_type == "QGemmWeightsOnly8bits"
+            else:
+                assert node.op_type == "QMatMulWeightsOnly8bits"
+
+    elif is_static:
         for org_node, node in zip(clone.graph, model.graph, strict=True):
             # Check for bias
             if len(org_node.inputs) == 3:

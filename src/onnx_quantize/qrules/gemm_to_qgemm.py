@@ -84,10 +84,29 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             _version=QUANT_OPSET.version,
         )
 
+    def _rewrite_weights_only(self, op, x, w, b, out):
+        node = out.producer()
+
+        # 2. Quantize the weights
+        qconfig = QConfig(**node.meta["qconfig"])
+        w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
+
+        return op.QGemmWeightsOnly8bits(
+            x,
+            w_q,
+            b,
+            w_scale,
+            w_zero_point,
+            _domain=QUANT_OPSET.domain,
+            _version=QUANT_OPSET.version,
+        )
+
     def rewrite(self, op, x, w, b, out):
         node = out.producer()
         qconfig = QConfig(**node.meta["qconfig"])
-        if qconfig.is_static:
+        if qconfig.weights_only:
+            return self._rewrite_weights_only(op, x, w, b, out)
+        elif qconfig.is_static:
             return self._rewrite_static(op, x, w, b, out)
         return self._rewrite_dynamic(op, x, w, b, out)
 

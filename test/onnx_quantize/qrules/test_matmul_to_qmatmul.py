@@ -11,7 +11,8 @@ from onnx_quantize.quantize import _add_qconfig_to_nodes
 
 
 @pytest.mark.parametrize("is_static", [True, False])
-def test_matmul_to_qmatmul(is_static):
+@pytest.mark.parametrize("weights_only", [True, False])
+def test_matmul_to_qmatmul(is_static, weights_only):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -26,15 +27,21 @@ def test_matmul_to_qmatmul(is_static):
     model.graph.initializer.extend([W1, W2])
 
     model = ir.from_proto(model)
-    qconfig = QConfig(is_static=is_static, weights_dtype=QuantType.QUInt8)
+    qconfig = QConfig(
+        is_static=is_static, weights_only=weights_only, weights_dtype=QuantType.QUInt8
+    )
 
-    if is_static:
+    if is_static and not weights_only:
         model = calibrate_model(model, qconfig)
 
     _add_qconfig_to_nodes(model, qconfig)
     model = onnxscript.rewriter.rewrite(model, matmul_to_qmatmul_rules)
 
-    if is_static:
+    if weights_only:
+        # Check that all nodes are of type 'QMatMulWeightsOnly8bits'
+        for node in model.graph:
+            assert node.op_type == "QMatMulWeightsOnly8bits"
+    elif is_static:
         # Check that all nodes are of type 'QMatMulStatic8bits'
         for node in model.graph:
             assert node.op_type == "QMatMulStatic8bits"
