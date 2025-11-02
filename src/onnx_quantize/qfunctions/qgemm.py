@@ -53,3 +53,16 @@ def QGemmDynamic8bits(X, W, B, w_scale, w_zero_point):
     dequantized_matmul = op.DequantizeLinear(out_bias, x_scale * w_scale)
 
     return dequantized_matmul
+
+
+@register_qfunction(target_optype="Gemm")
+@script(opset=QUANT_OPSET)
+def QGemmWeightsOnly8bits(X, W, B, w_scale, w_zero_point):
+    """Weights only Quantized MatMul using ONNX ops."""
+    # Dequantize weights
+    dequantized_weights = op.DequantizeLinear(W, w_scale, w_zero_point)
+
+    # Bias is not quantized
+    out_matmul = op.Gemm(X, dequantized_weights, B)
+
+    return out_matmul

@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import warnings
 
 import numpy as np
 
@@ -27,6 +28,7 @@ class QConfig:
 
     Args:
         is_static (`bool`, , defaults to `True`): Whether it is static or dynamic quantization.
+        weights_only (`bool`, , defaults to `False`): Whether to quantize only weights or not.
         activations_dtype (`QuantType`, defaults to `QuantType.QUInt8`):
             The quantization data types to use for the activations.
         activations_symmetric (`bool`, defaults to `False`):
@@ -42,6 +44,7 @@ class QConfig:
     """
 
     is_static: bool = True
+    weights_only: bool = False
     calibration_data: np.ndarray | None = None
     activations_dtype: QuantType = QuantType.QUInt8
     activations_symmetric: bool = False
@@ -55,6 +58,10 @@ class QConfig:
             raise ValueError(
                 "Dynamic quantization cannot be used with int8 weights. "
                 "Please set weights_dtype=QuantType.QUInt8 or use static quantization."
+            )
+        if self.weights_only and self.calibration_data is not None:
+            warnings.warn(
+                "calibration_data is ignored when weight_only is set to True.", stacklevel=1
             )
 
 

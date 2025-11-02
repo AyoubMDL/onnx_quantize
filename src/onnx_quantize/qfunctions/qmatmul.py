@@ -31,3 +31,14 @@ def QMatMulDynamic8bits(X, W, w_scale, w_zero_point):
     dequantized_matmul = op.DequantizeLinear(out_matmul, x_scale * w_scale)
 
     return dequantized_matmul
+
+
+@register_qfunction(target_optype="MatMul")
+@script(opset=QUANT_OPSET)
+def QMatMulWeightsOnly8bits(X, W, w_scale, w_zero_point):
+    """Weights only Quantized MatMul using ONNX ops."""
+    # Dequantize weights
+    dequantized_weights = op.DequantizeLinear(W, w_scale, w_zero_point)
+    out_matmul = op.MatMul(X, dequantized_weights)
+
+    return out_matmul
