@@ -13,6 +13,7 @@ dependencies = ["onnxscript", "onnxruntime"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+integration = ["pytest", "optimum-onnx", "datasets"]
 
 # ---------------- Ruff ----------------
 [tool.ruff]
