@@ -163,6 +163,20 @@ def quantize_tensor(fp_tensor, quant_type=QuantType.QInt8, is_symmetric=False, p
     return q_tensor, scale, zero_point
 
 
+def dequantize_tensor(q_tensor, scale, zero_point):
+    """Dequantizes a tensor.
+
+    Args:
+        q_tensor (np.ndarray): The quantized tensor to dequantize.
+        scale (np.ndarray): The scaling factor.
+        zero_point (np.ndarray): The zero point.
+
+    Returns:
+        np.ndarray: The dequantized tensor
+    """
+    return (q_tensor - zero_point).astype(np.float32) * scale
+
+
 def quantize_bias(bias, input_scale, weight_scale):
     """Linear quantization for single bias tensor quantized_bias = fp_bias / bias_scale.
 
