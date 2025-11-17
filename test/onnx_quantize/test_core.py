@@ -4,6 +4,7 @@ import pytest
 from onnx_quantize import QuantType
 from onnx_quantize.core import (
     QUANT_TYPE_TO_NP_DTYPE,
+    dequantize_tensor,
     get_quantization_params,
     get_quantized_range,
     quantize_bias,
@@ -117,6 +118,11 @@ def test_quantize_tensor_shapes_and_ranges(fp_tensor, quant_type, symmetric):
     assert scale >= 0
 
     assert zero_point == 0 if symmetric else True
+
+    # Check dequantization
+    dq_tensor = dequantize_tensor(q_tensor, scale, zero_point)
+    assert dq_tensor.shape == q_tensor.shape
+    assert dq_tensor.dtype == np.float32
 
 
 def test_quantize_bias(rng):
