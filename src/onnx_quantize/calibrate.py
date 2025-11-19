@@ -3,7 +3,7 @@ import onnx_ir as ir
 import onnxruntime
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE
-from onnx_quantize.core import QConfig, get_quantization_params
+from onnx_quantize.core import QConfig, get_quantization_params_from_tensor
 
 
 def get_nodes_to_quantize(ir_model, op_types_to_calibrate):
@@ -71,11 +71,14 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
 
     for node in ir_model.graph:
         if node.op_type in OP_TYPES_TO_QUANTIZE and node.inputs[0].name in collected_outputs:
-            node.meta["input_scale"], node.meta["input_zero_point"] = get_quantization_params(
-                collected_outputs[node.inputs[0].name],
-                qconfig.activations_dtype,
-                qconfig.activations_symmetric,
-                per_channel=False,  # We support only per-tensor quantization for activations
+            node.meta["input_scale"], node.meta["input_zero_point"] = (
+                get_quantization_params_from_tensor(
+                    collected_outputs[node.inputs[0].name],
+                    qconfig.activations_dtype,
+                    qconfig.activations_symmetric,
+                    per_channel=False,  # We support only per-tensor quantization for activations
+                    mse=qconfig.mse,
+                )
             )
 
     return ir_model

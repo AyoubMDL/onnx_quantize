@@ -78,11 +78,13 @@ def _get_matmul_add_model():
     ],
 )
 @pytest.mark.parametrize("weights_only", [True, False])
+@pytest.mark.parametrize("mse", [True, False])
 @pytest.mark.parametrize("model", [_get_matmul_model(), _get_gemm_model(), _get_matmul_add_model()])
 def test_quantize(
     model,
     is_static,
     weights_only,
+    mse,
     activations_dtype,
     activations_symmetric,
     weights_dtype,
@@ -92,6 +94,7 @@ def test_quantize(
     qconfig = QConfig(
         is_static=is_static,
         weights_only=weights_only,
+        mse=mse,
         activations_dtype=activations_dtype,
         activations_symmetric=activations_symmetric,
         weights_dtype=weights_dtype,
