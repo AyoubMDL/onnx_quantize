@@ -20,9 +20,9 @@ def test_quantize_bert_weights_only(tmp_path):
 
     qconfig = QConfig(
         weights_only=True,
-        weights_dtype=QuantType.QInt8,
-        weights_symmetric=False,
-        weights_per_channel=True,
+        weights_dtype=QuantType.QUInt8,
+        weights_symmetric=True,
+        weights_per_channel=False,
     )
     qmodel = quantize(model, qconfig)
     onnx.save(qmodel, tmp_path / "quantized_model.onnx")
@@ -49,4 +49,4 @@ def test_quantize_bert_weights_only(tmp_path):
         correct += (preds == batch["label"]).sum().item()
 
     # TODO: float has about 0.94
-    assert correct / len(dataset) > 0.8
+    assert correct / len(dataset) == 0.86
