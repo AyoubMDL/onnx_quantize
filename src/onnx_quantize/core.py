@@ -29,6 +29,7 @@ class QConfig:
     Args:
         is_static (`bool`, , defaults to `True`): Whether it is static or dynamic quantization.
         weights_only (`bool`, , defaults to `False`): Whether to quantize only weights or not.
+        clip_ratio (float, optional): percentile of clip. Defaults to 1.0
         mse (`bool`, , defaults to `False`): Whether to use MSE minimization to compute
             quantization parameters.
         activations_dtype (`QuantType`, defaults to `QuantType.QUInt8`):
@@ -47,6 +48,7 @@ class QConfig:
 
     is_static: bool = True
     weights_only: bool = False
+    clip_ratio: float = 1.0
     mse: bool = False
     calibration_data: np.ndarray | None = None
     activations_dtype: QuantType = QuantType.QUInt8
@@ -215,25 +217,27 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric):
 
         scale = (max_vals - min_vals) / (quantized_max - quantized_min)
         zero_point = quantized_min - (min_vals / scale)
-        zero_point = np.round(np.clip(zero_point, quantized_min, quantized_max)).astype(np.int8)
+        zero_point = np.round(np.clip(zero_point, quantized_min, quantized_max))
 
         return scale.astype(np.float32), zero_point.astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
 
     def _get_quantization_params_symmetric(max_vals, quant_type):
-        _, quantized_max = get_quantized_range(quant_type, is_symmetric=True)
-        scale = max_vals / quantized_max
+        quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric=True)
+        scale = (2 * max_vals) / quantized_max
+        zero = np.multiply(
+            np.ones(max_vals.shape), np.round((quantized_max + quantized_min) / 2.0)
+        ).astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
 
-        return scale.astype(np.float32), np.zeros_like(
-            scale, dtype=QUANT_TYPE_TO_NP_DTYPE[quant_type]
-        )
+        return scale.astype(np.float32), zero
 
     if is_symmetric:
+        max_vals = np.maximum(np.abs(min_vals), np.abs(max_vals))
         return _get_quantization_params_symmetric(max_vals, quant_type)
     return _get_quantization_params_asymmetric(min_vals, max_vals, quant_type)
 
 
 def get_quantization_params_from_tensor(
-    fp_tensor, quant_type, is_symmetric=False, per_channel=True, mse=False
+    fp_tensor, quant_type, is_symmetric=False, per_channel=True, clip_ratio=1.0, mse=False
 ):
     """Calculates the quantization parameters from a tensor.
 
@@ -244,6 +248,7 @@ def get_quantization_params_from_tensor(
         is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
         per_channel (bool): Whether to compute per-channel quantization parameters.
             Defaults to True.
+        clip_ratio (float, optional): percentile of clip. Defaults to 1.0
         mse (bool, optional): Whether to use MSE minimization to compute quantization parameters.
             Defaults to False
 
@@ -251,7 +256,14 @@ def get_quantization_params_from_tensor(
         tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
     """
     axis = 0 if per_channel else None
-    min_vals, max_vals = np.min(fp_tensor, axis=axis), np.max(fp_tensor, axis=axis)
+    min_vals, max_vals = (
+        np.min(fp_tensor, axis=axis) * clip_ratio,
+        np.max(fp_tensor, axis=axis) * clip_ratio,
+    )
+
+    # Include Zero in the range to have a valid zero point
+    min_vals = np.minimum(min_vals, 0)
+    max_vals = np.maximum(max_vals, 0)
 
     if mse:
         min_vals, max_vals = calculate_mse_min_max(fp_tensor, quant_type, is_symmetric, per_channel)
@@ -271,7 +283,12 @@ def _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point):
 
 
 def quantize_tensor(
-    fp_tensor, quant_type=QuantType.QInt8, is_symmetric=False, per_channel=False, mse=False
+    fp_tensor,
+    quant_type=QuantType.QInt8,
+    is_symmetric=False,
+    per_channel=False,
+    clip_ratio=1.0,
+    mse=False,
 ):
     """Quantizes a tensor using asymmetric quantization.
 
@@ -281,6 +298,7 @@ def quantize_tensor(
             or unsigned (QUInt8). Defaults to QuantType.QInt8.
         is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
         per_channel (bool): Whether to perform per-channel quantization. Defaults to False.
+        clip_ratio (float, optional): percentile of clip. Defaults to 1.0
         mse (bool, optional): Whether to use MSE minimization to compute quantization parameters.
             Defaults to False.
 
@@ -288,7 +306,7 @@ def quantize_tensor(
         tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
     """
     scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, quant_type, is_symmetric, per_channel, mse
+        fp_tensor, quant_type, is_symmetric, per_channel, clip_ratio, mse
     )
     q_tensor = _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point)
     return q_tensor, scale, zero_point
@@ -305,7 +323,7 @@ def dequantize_tensor(q_tensor, scale, zero_point):
     Returns:
         np.ndarray: The dequantized tensor
     """
-    return (q_tensor - zero_point).astype(np.float32) * scale
+    return (q_tensor.astype(np.float32) - zero_point.astype(np.float32)) * scale
 
 
 def fake_quantize_tensor(
