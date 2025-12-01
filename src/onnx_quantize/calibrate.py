@@ -76,6 +76,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
                     collected_outputs[node.inputs[0].name],
                     qconfig.activations_dtype,
                     qconfig.activations_symmetric,
+                    qconfig.reduce_range,
                     per_channel=False,  # We support only per-tensor quantization for activations
                     mse=qconfig.mse,
                 )

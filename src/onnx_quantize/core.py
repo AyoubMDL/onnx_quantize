@@ -5,21 +5,55 @@ import warnings
 import numpy as np
 
 
+_DTYPE_RANGES = {
+    np.uint8: (0, 255),
+    np.int8: (-128, 127),
+    np.uint32: (0, 2**32 - 1),
+    np.int32: (-(2**31), 2**31 - 1),
+}
+
+_SYMMETRIC_RANGES = {
+    np.int8: (-127, 127),
+    np.int32: (-(2**31 - 1), 2**31 - 1),
+}
+
+_REDUCED_RANGES = {
+    np.uint8: (0, 127),
+    np.int8: (-64, 64),
+    np.uint32: (0, 2**31 - 1),
+    np.int32: (-(2**30), 2**30),
+}
+
+
 class QuantType(enum.Enum):
     """Enumeration of quantization types."""
 
     QInt8 = 0
     QUInt8 = 1
     QInt32 = 2
+    QUInt32 = 3
 
+    @property
+    def np_dtype(self):
+        if self == QuantType.QInt8:
+            return np.int8
+        if self == QuantType.QUInt8:
+            return np.uint8
+        if self == QuantType.QInt32:
+            return np.int32
+        if self == QuantType.QUInt32:
+            return np.uint32
 
-QUANT_TYPE_TO_NP_DTYPE = {
-    QuantType.QInt8: np.int8,
-    QuantType.QUInt8: np.uint8,
-    QuantType.QInt32: np.int32,
-}
+    def qrange(self, is_symmetric, reduce_range=False):
+        np_dtype = self.np_dtype
+        if reduce_range:
+            qrange = _REDUCED_RANGES.get(np_dtype)
+        elif is_symmetric and np_dtype in _SYMMETRIC_RANGES:
+            qrange = _SYMMETRIC_RANGES[np_dtype]
+        else:
+            qrange = _DTYPE_RANGES.get(np_dtype)
 
-_SIGNED_QUANT_TYPES = {QuantType.QInt8}
+        return qrange
 
 
 @dataclasses.dataclass
@@ -30,6 +64,8 @@ class QConfig:
         is_static (`bool`, , defaults to `True`): Whether it is static or dynamic quantization.
         weights_only (`bool`, , defaults to `False`): Whether to quantize only weights or not.
         clip_ratio (float, optional): percentile of clip. Defaults to 1.0
+        reduce_range (bool, optional): Whether to use reduced range for quantization.
+            Defaults to False.
         mse (`bool`, , defaults to `False`): Whether to use MSE minimization to compute
             quantization parameters.
         activations_dtype (`QuantType`, defaults to `QuantType.QUInt8`):
@@ -49,6 +85,7 @@ class QConfig:
     is_static: bool = True
     weights_only: bool = False
     clip_ratio: float = 1.0
+    reduce_range: bool = False
     mse: bool = False
     calibration_data: np.ndarray | None = None
     activations_dtype: QuantType = QuantType.QUInt8
@@ -70,40 +107,11 @@ class QConfig:
             )
 
 
-def get_quantized_range(quant_type=QuantType.QInt8, is_symmetric=False):
-    """Computes the minimum and maximum representable values for asymmetric quantization.
-
-    Args:
-        quant_type (QuantType, optional): The quantization type, either signed (QInt8)
-            or unsigned (QUInt8). Defaults to QuantType.QInt8.
-        is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
-
-    Returns:
-        tuple[int, int]: The minimum and maximum quantized values.
-    """
-    bitwidth = np.dtype(QUANT_TYPE_TO_NP_DTYPE[quant_type]).itemsize * 8
-
-    if quant_type in _SIGNED_QUANT_TYPES:
-        bitwidth -= 1
-        quantized_min = -(1 << (bitwidth))
-        if is_symmetric:
-            quantized_min += 1
-
-        quantized_max = (1 << (bitwidth)) - 1
-
-    else:
-        # For symmetric + unsinged is not commonly used, but we can still define:
-        # 0 .. (2^bitwidth - 1)
-        quantized_min = 0
-        quantized_max = (1 << bitwidth) - 1
-
-    return quantized_min, quantized_max
-
-
 def calculate_mse_min_max(
     fp_tensor,
     quant_type,
     is_symmetric,
+    reduce_range,
     per_channel,
     maxshrink=0.20,
     patience=5,
@@ -120,6 +128,7 @@ def calculate_mse_min_max(
         fp_tensor (np.ndarray): The floating-point tensor to be quantized.
         quant_type (QuantType): The quantization data type.
         is_symmetric (bool): Whether to use symmetric quantization.
+        reduce_range (bool): Whether to use reduced range for quantization.
         per_channel (bool): Whether to perform per-channel quantization or
             per-tensor quantization.
         maxshrink (float, optional): Maximum shrinkage factor as a fraction of the
@@ -158,6 +167,7 @@ def calculate_mse_min_max(
             max_vals=shrinked_max_val,
             quant_type=quant_type,
             is_symmetric=is_symmetric,
+            reduce_range=reduce_range,
         )
         q = fake_quantize_tensor(
             fp_tensor,
@@ -165,6 +175,7 @@ def calculate_mse_min_max(
             candidate_zero_points,
             quant_type,
             is_symmetric,
+            reduce_range,
         )
 
         q -= fp_tensor
@@ -199,7 +210,7 @@ def calculate_mse_min_max(
     return best_min_val, best_max_val
 
 
-def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric):
+def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce_range):
     """Calculates the quantization parameters.
 
     Args:
@@ -207,26 +218,31 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric):
         max_vals (np.ndarray): The maximum values of the tensor to be quantized.
         quant_type (QuantType, optional): The quantization type.
         is_symmetric (bool): Whether to use symmetric quantization.
+        reduce_range (bool): Whether to use reduced range for quantization.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
     """
 
     def _get_quantization_params_asymmetric(min_vals, max_vals, quant_type):
-        quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric=False)
+        quantized_min, quantized_max = quant_type.qrange(
+            is_symmetric=False, reduce_range=reduce_range
+        )
 
         scale = (max_vals - min_vals) / (quantized_max - quantized_min)
         zero_point = quantized_min - (min_vals / scale)
         zero_point = np.round(np.clip(zero_point, quantized_min, quantized_max))
 
-        return scale.astype(np.float32), zero_point.astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
+        return scale.astype(np.float32), zero_point.astype(quant_type.np_dtype)
 
     def _get_quantization_params_symmetric(max_vals, quant_type):
-        quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric=True)
-        scale = (2 * max_vals) / quantized_max
+        quantized_min, quantized_max = quant_type.qrange(
+            is_symmetric=True, reduce_range=reduce_range
+        )
+        scale = (2 * max_vals) / (quantized_max - quantized_min)
         zero = np.multiply(
             np.ones(max_vals.shape), np.round((quantized_max + quantized_min) / 2.0)
-        ).astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
+        ).astype(quant_type.np_dtype)
 
         return scale.astype(np.float32), zero
 
@@ -237,7 +253,13 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric):
 
 
 def get_quantization_params_from_tensor(
-    fp_tensor, quant_type, is_symmetric=False, per_channel=True, clip_ratio=1.0, mse=False
+    fp_tensor,
+    quant_type,
+    is_symmetric=False,
+    reduce_range=False,
+    per_channel=True,
+    clip_ratio=1.0,
+    mse=False,
 ):
     """Calculates the quantization parameters from a tensor.
 
@@ -246,6 +268,8 @@ def get_quantization_params_from_tensor(
         quant_type (QuantType, optional): The quantization type, either signed (QInt8)
             or unsigned (QUInt8)
         is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
+        reduce_range (bool, optional): Whether to use reduced range for quantization.
+            Defaults to False.
         per_channel (bool): Whether to compute per-channel quantization parameters.
             Defaults to True.
         clip_ratio (float, optional): percentile of clip. Defaults to 1.0
@@ -266,26 +290,30 @@ def get_quantization_params_from_tensor(
     max_vals = np.maximum(max_vals, 0)
 
     if mse:
-        min_vals, max_vals = calculate_mse_min_max(fp_tensor, quant_type, is_symmetric, per_channel)
+        min_vals, max_vals = calculate_mse_min_max(
+            fp_tensor, quant_type, is_symmetric, reduce_range, per_channel
+        )
 
-    return get_quantization_params(min_vals, max_vals, quant_type, is_symmetric)
+    return get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce_range)
 
 
-def _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point):
+def _linear_quantize(fp_tensor, quant_type, is_symmetric, reduce_range, scale, zero_point):
     fp_tensor_scaled = fp_tensor / scale
     shifted_tensor = np.round(fp_tensor_scaled).astype(np.int32) + zero_point
 
-    quantized_min, quantized_max = get_quantized_range(quant_type, is_symmetric)
+    quantized_min, quantized_max = quant_type.qrange(is_symmetric, reduce_range)
     q_tensor = np.clip(shifted_tensor, quantized_min, quantized_max)
-    q_tensor = q_tensor.astype(QUANT_TYPE_TO_NP_DTYPE[quant_type])
+    q_tensor = q_tensor.astype(quant_type.np_dtype)
 
     return q_tensor
 
 
 def quantize_tensor(
     fp_tensor,
-    quant_type=QuantType.QInt8,
+    quant_type,
+    *,
     is_symmetric=False,
+    reduce_range=False,
     per_channel=False,
     clip_ratio=1.0,
     mse=False,
@@ -297,6 +325,8 @@ def quantize_tensor(
         quant_type (QuantType, optional): The quantization type, either signed (QInt8)
             or unsigned (QUInt8). Defaults to QuantType.QInt8.
         is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
+        reduce_range (bool, optional): Whether to use reduced range for quantization.
+            Defaults to False.
         per_channel (bool): Whether to perform per-channel quantization. Defaults to False.
         clip_ratio (float, optional): percentile of clip. Defaults to 1.0
         mse (bool, optional): Whether to use MSE minimization to compute quantization parameters.
@@ -306,9 +336,17 @@ def quantize_tensor(
         tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
     """
     scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, quant_type, is_symmetric, per_channel, clip_ratio, mse
+        fp_tensor,
+        quant_type,
+        is_symmetric=is_symmetric,
+        reduce_range=reduce_range,
+        per_channel=per_channel,
+        clip_ratio=clip_ratio,
+        mse=mse,
     )
-    q_tensor = _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point)
+    q_tensor = _linear_quantize(
+        fp_tensor, quant_type, is_symmetric, reduce_range, scale, zero_point
+    )
     return q_tensor, scale, zero_point
 
 
@@ -327,7 +365,7 @@ def dequantize_tensor(q_tensor, scale, zero_point):
 
 
 def fake_quantize_tensor(
-    fp_tensor, scale, zero_point, quant_type=QuantType.QInt8, is_symmetric=False
+    fp_tensor, scale, zero_point, quant_type=QuantType.QInt8, is_symmetric=False, reduce_range=False
 ):
     """Quantizes a tensor using asymmetric quantization.
 
@@ -338,11 +376,15 @@ def fake_quantize_tensor(
         quant_type (QuantType, optional): The quantization type, either signed (QInt8)
             or unsigned (QUInt8). Defaults to QuantType.QInt8.
         is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
+        reduce_range (bool, optional): Whether to use reduced range for quantization.
+            Defaults to False.
 
     Returns:
         tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
     """
-    q_tensor = _linear_quantize(fp_tensor, quant_type, is_symmetric, scale, zero_point)
+    q_tensor = _linear_quantize(
+        fp_tensor, quant_type, is_symmetric, reduce_range, scale, zero_point
+    )
     return dequantize_tensor(q_tensor, scale, zero_point)
 
 
@@ -365,6 +407,11 @@ def quantize_bias(bias, input_scale, weight_scale):
 
     bias_scale = weight_scale * input_scale
     qbias = _linear_quantize(
-        bias, QuantType.QInt32, is_symmetric=False, scale=bias_scale, zero_point=0
+        bias,
+        QuantType.QInt32,
+        is_symmetric=False,
+        reduce_range=False,
+        scale=bias_scale,
+        zero_point=0,
     )
     return qbias, bias_scale, 0

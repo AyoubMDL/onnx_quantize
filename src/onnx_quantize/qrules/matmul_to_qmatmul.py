@@ -33,8 +33,11 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         w_q, w_scale, w_zero_point = quantize_tensor(
             w.const_value.numpy(),
             qconfig.weights_dtype,
-            qconfig.weights_symmetric,
-            qconfig.weights_per_channel,
+            is_symmetric=qconfig.weights_symmetric,
+            reduce_range=qconfig.reduce_range,
+            per_channel=qconfig.weights_per_channel,
+            clip_ratio=qconfig.clip_ratio,
+            mse=qconfig.mse,
         )
 
         w_q = op.initializer(ir.tensor(w_q), name=w.name)
