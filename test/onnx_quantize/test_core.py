@@ -3,31 +3,37 @@ import pytest
 
 from onnx_quantize import QuantType
 from onnx_quantize.core import (
-    QUANT_TYPE_TO_NP_DTYPE,
     calculate_mse_min_max,
     dequantize_tensor,
     get_quantization_params_from_tensor,
-    get_quantized_range,
     quantize_bias,
     quantize_tensor,
 )
 
 
 @pytest.mark.parametrize(
-    "quant_type, symmetric, expected",
+    "quant_type, symmetric, reduce_range, expected",
     [
-        # Signed QInt8 - Asymmetric
-        (QuantType.QInt8, False, (-128, 127)),
-        # Signed QInt8 - Symmetric
-        (QuantType.QInt8, True, (-127, 127)),
-        # Unsigned QUInt8 - Asymmetric
-        (QuantType.QUInt8, False, (0, 255)),
-        # Unsigned QUInt8 - Symmetric (not common, but supported)
-        (QuantType.QUInt8, True, (0, 255)),
+        # Int8
+        (QuantType.QInt8, False, False, (-128, 127)),
+        (QuantType.QInt8, True, False, (-127, 127)),
+        (QuantType.QInt8, True, True, (-64, 64)),
+        # UInt8
+        (QuantType.QUInt8, False, False, (0, 255)),
+        (QuantType.QUInt8, True, False, (0, 255)),
+        (QuantType.QUInt8, True, True, (0, 127)),
+        # Int32
+        (QuantType.QInt32, False, False, (-(2**31), 2**31 - 1)),
+        (QuantType.QInt32, True, False, (-(2**31 - 1), 2**31 - 1)),
+        (QuantType.QInt32, True, True, (-(2**30), 2**30)),
+        # UInt32
+        (QuantType.QUInt32, False, False, (0, 2**32 - 1)),
+        (QuantType.QUInt32, True, False, (0, 2**32 - 1)),
+        (QuantType.QUInt32, True, True, (0, 2**31 - 1)),
     ],
 )
-def test_get_quantized_range(quant_type, symmetric, expected):
-    result = get_quantized_range(quant_type, symmetric)
+def test_quant_type(quant_type, symmetric, reduce_range, expected):
+    result = quant_type.qrange(symmetric, reduce_range)
     assert result == expected
 
 
@@ -46,10 +52,13 @@ def test_get_quantized_range(quant_type, symmetric, expected):
 )
 @pytest.mark.parametrize("per_channel", [False, True])
 @pytest.mark.parametrize("mse", [False, True])
-def test_get_quantization_params_valid(fp_tensor, quant_type, symmetric, per_channel, mse):
+@pytest.mark.parametrize("reduce_range", [False, True])
+def test_get_quantization_params_valid(
+    fp_tensor, quant_type, symmetric, per_channel, mse, reduce_range
+):
     # TODO: Rework this test
     scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, quant_type, symmetric, per_channel, mse
+        fp_tensor, quant_type, symmetric, reduce_range, per_channel, mse
     )
 
     # scale is always positive
@@ -72,7 +81,7 @@ def test_asymmetric_behavior_qint8():
     )
 
     # Expected range from get_quantized_range: (-128, 127)
-    expected_scale = (5.0 - (-5.0)) / (127 - (-128))
+    expected_scale = 0.0392156862745098
     np.testing.assert_allclose(scale, expected_scale)
     assert -128 <= zero_point <= 127
 
@@ -83,7 +92,7 @@ def test_symmetric_behavior_qint8():
         fp_tensor, QuantType.QInt8, is_symmetric=True, per_channel=False
     )
 
-    expected_scale = 20.0 / 127
+    expected_scale = 0.07874015748031496
     np.testing.assert_allclose(scale, expected_scale)
     assert zero_point == 0
 
@@ -101,17 +110,20 @@ def test_symmetric_behavior_qint8():
         (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, True),
     ],
 )
-def test_quantize_tensor_shapes_and_ranges(fp_tensor, quant_type, symmetric):
-    q_tensor, scale, zero_point = quantize_tensor(fp_tensor, quant_type, symmetric)
+@pytest.mark.parametrize("reduce_range", [False, True])
+def test_quantize_tensor_shapes_and_ranges(fp_tensor, quant_type, symmetric, reduce_range):
+    q_tensor, scale, zero_point = quantize_tensor(
+        fp_tensor, quant_type, is_symmetric=symmetric, reduce_range=reduce_range
+    )
 
     # Shape must match input
     assert q_tensor.shape == fp_tensor.shape
 
     # dtype must match quant_type
-    assert q_tensor.dtype == QUANT_TYPE_TO_NP_DTYPE[quant_type]
+    assert q_tensor.dtype == quant_type.np_dtype
 
     # Values must be inside quantized range
-    qmin, qmax = get_quantized_range(quant_type, symmetric)
+    qmin, qmax = quant_type.qrange(symmetric)
     assert np.all(q_tensor >= qmin)
     assert np.all(q_tensor <= qmax)
 
@@ -148,13 +160,15 @@ def test_quantize_bias(rng):
         (False, 50, 1),
     ],
 )
-def test_calculate_mse_min_max(per_channel, grid, patience):
+@pytest.mark.parametrize("reduce_range", [False, True])
+def test_calculate_mse_min_max(per_channel, grid, patience, reduce_range):
     """Test calculate_mse_min_max for shapes, ranges, and consistency."""
     fp_tensor = np.array([[-1.0, 2.0, 3.0], [0.5, -0.2, 1.0]], dtype=np.float32)
     best_min, best_max = calculate_mse_min_max(
         fp_tensor,
         quant_type=QuantType.QInt8,
         is_symmetric=False,
+        reduce_range=reduce_range,
         per_channel=per_channel,
         grid=grid,
         patience=patience,
