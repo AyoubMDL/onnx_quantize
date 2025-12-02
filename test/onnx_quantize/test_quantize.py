@@ -77,10 +77,11 @@ def _get_matmul_add_model():
         (False, QuantType.QUInt8, False, QuantType.QUInt8, False, False),
     ],
 )
-@pytest.mark.parametrize("weights_only", [True, False])
+@pytest.mark.parametrize("weights_only, use_gptq", [(True, True), (True, False), (False, False)])
 @pytest.mark.parametrize("mse", [True, False])
 @pytest.mark.parametrize("model", [_get_matmul_model(), _get_gemm_model(), _get_matmul_add_model()])
 def test_quantize(
+    rng,
     model,
     is_static,
     weights_only,
@@ -90,16 +91,22 @@ def test_quantize(
     weights_dtype,
     weights_symmetric,
     weights_per_channel,
+    use_gptq,
 ):
+    calibration_data = (
+        rng.uniform(-1, 1, size=(2, 32)).astype(np.float32) if weights_only or use_gptq else None
+    )
     qconfig = QConfig(
         is_static=is_static,
         weights_only=weights_only,
+        calibration_data=calibration_data,
         mse=mse,
         activations_dtype=activations_dtype,
         activations_symmetric=activations_symmetric,
         weights_dtype=weights_dtype,
         weights_symmetric=weights_symmetric,
         weights_per_channel=weights_per_channel,
+        use_gptq=use_gptq,
     )
     qmodel = quantize(model, qconfig)
 
@@ -109,6 +116,5 @@ def test_quantize(
     # Check inference
     qsession = onnxruntime.InferenceSession(qmodel.SerializeToString())
 
-    rng = np.random.default_rng(99)
     data = rng.uniform(-1, 1, size=(2, 32)).astype(np.float32)
     qsession.run(None, {"X": data})
