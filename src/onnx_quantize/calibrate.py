@@ -71,6 +71,11 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
 
     for node in ir_model.graph:
         if node.op_type in OP_TYPES_TO_QUANTIZE and node.inputs[0].name in collected_outputs:
+            if qconfig.use_gptq:
+                # Collect input activations to compute Hessian
+                node.meta["input"] = collected_outputs[node.inputs[0].name]
+                continue  # GPTQ is weight only quantization
+
             node.meta["input_scale"], node.meta["input_zero_point"] = (
                 get_quantization_params_from_tensor(
                     collected_outputs[node.inputs[0].name],

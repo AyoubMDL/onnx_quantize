@@ -41,7 +41,7 @@ def quantize(model: onnx.ModelProto, qconfig: QConfig) -> onnx.ModelProto:
     ir_model = onnxscript.rewriter.rewrite(ir_model, pre_rules)
 
     # Calibrate the model to compute quantization parameters
-    if qconfig.is_static and not qconfig.weights_only:
+    if (qconfig.is_static and not qconfig.weights_only) or qconfig.use_gptq:
         ir_model = calibrate_model(ir_model, qconfig)
 
     _add_qconfig_to_nodes(ir_model, qconfig)

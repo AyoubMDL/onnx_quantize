@@ -3,6 +3,7 @@ import onnx_ir as ir
 import onnxscript
 
 from onnx_quantize.core import QConfig, quantize_tensor
+from onnx_quantize.gptq import gptq_quantize
 from onnx_quantize.qfunctions import QUANT_OPSET
 
 
@@ -28,6 +29,30 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         elif qconfig.is_static:
             return self._rewrite_static(op, x, w, out)
         return self._rewrite_dynamic(op, x, w, out)
+
+    def _quantize_gptq(self, op, x, w, inputs, qconfig):
+        w_q, w_scale, w_zero_point = gptq_quantize(
+            w.const_value.numpy(),
+            inputs,
+            quant_type=qconfig.weights_dtype,
+            is_symmetric=qconfig.weights_symmetric,
+            reduce_range=qconfig.reduce_range,
+            clip_ratio=qconfig.clip_ratio,
+            group_size=qconfig.group_size,
+            block_size=qconfig.block_size,
+            percdamp=qconfig.percdamp,
+            actorder=qconfig.actorder,
+            mse=qconfig.mse,
+            per_channel=qconfig.weights_per_channel,
+        )
+
+        w_q = op.initializer(ir.tensor(w_q), name=w.name)
+        w_scale = op.initializer(ir.tensor(np.squeeze(w_scale)), name=f"{x.name}/w_scale")
+        w_zero_point = op.initializer(
+            ir.tensor(np.squeeze(w_zero_point)), name=f"{x.name}/w_zero_point"
+        )
+
+        return w_q, w_scale, w_zero_point
 
     def _quantize_weights(self, op, x, w, qconfig):
         w_q, w_scale, w_zero_point = quantize_tensor(
@@ -93,7 +118,11 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
 
         # 2. Quantize the weights
         qconfig = QConfig(**node.meta["qconfig"])
-        w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
+
+        if qconfig.use_gptq:
+            w_q, w_scale, w_zero_point = self._quantize_gptq(op, x, w, node.meta["input"], qconfig)
+        else:
+            w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
         return op.QMatMulWeightsOnly8bits(
             x,

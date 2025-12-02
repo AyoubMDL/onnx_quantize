@@ -89,7 +89,11 @@ class GemmBiasToQGemmBias(GemmToQGemm):
 
         # 2. Quantize the weights
         qconfig = QConfig(**node.meta["qconfig"])
-        w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
+
+        if qconfig.use_gptq:
+            w_q, w_scale, w_zero_point = self._quantize_gptq(op, x, w, node.meta["input"], qconfig)
+        else:
+            w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
         return op.QGemmWeightsOnly8bits(
             x,

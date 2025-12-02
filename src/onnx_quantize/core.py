@@ -80,6 +80,11 @@ class QConfig:
             Whether we should quantize per-channel (also known as "per-row"). Enabling this
             can increase overall accuracy while making the quantized model heavier.
             For activation, onnx has weird per channel ops for the activations.
+        use_gptq (bool, optional): Whether to use GPTQ quantization. Defaults to False.
+        block_size (int, optional): GPTQ block size. Defaults to 128.
+        percdamp (float, optional): GPTQ percent of damping. Defaults to 0.01.
+        group_size (int, optional): GPTQ group size. Defaults to -1.
+        actorder (bool, optional): GPTQ activation order. Defaults to False.
     """
 
     is_static: bool = True
@@ -93,6 +98,11 @@ class QConfig:
     weights_dtype: QuantType = QuantType.QInt8
     weights_symmetric: bool = True
     weights_per_channel: bool = False
+    use_gptq: bool = False
+    block_size: int = 128
+    percdamp: float = 0.01
+    group_size: int = -1
+    actorder: bool = False
 
     def __post_init__(self):
         """Check: can't use dynamic quantization with int8 weights."""
@@ -104,6 +114,12 @@ class QConfig:
         if self.weights_only and self.calibration_data is not None:
             warnings.warn(
                 "calibration_data is ignored when weight_only is set to True.", stacklevel=1
+            )
+
+        if self.use_gptq and not self.weights_only:
+            raise ValueError(
+                "GPTQ configuration can only be used with weights_only=True. "
+                "Please set weights_only=True when using gpt_config."
             )
 
 
