@@ -12,89 +12,123 @@ from onnx_quantize.core import (
 
 
 @pytest.mark.parametrize(
-    "quant_type, symmetric, reduce_range, expected",
+    "fp_tensor, quant_type, symmetric, expected_scale, expected_zp",
     [
-        # Int8
-        (QuantType.QInt8, False, False, (-128, 127)),
-        (QuantType.QInt8, True, False, (-127, 127)),
-        (QuantType.QInt8, True, True, (-64, 64)),
-        # UInt8
-        (QuantType.QUInt8, False, False, (0, 255)),
-        (QuantType.QUInt8, True, False, (0, 255)),
-        (QuantType.QUInt8, True, True, (0, 127)),
-        # Int32
-        (QuantType.QInt32, False, False, (-(2**31), 2**31 - 1)),
-        (QuantType.QInt32, True, False, (-(2**31 - 1), 2**31 - 1)),
-        (QuantType.QInt32, True, True, (-(2**30), 2**30)),
-        # UInt32
-        (QuantType.QUInt32, False, False, (0, 2**32 - 1)),
-        (QuantType.QUInt32, True, False, (0, 2**32 - 1)),
-        (QuantType.QUInt32, True, True, (0, 2**31 - 1)),
+        # Edge case: all zeros
+        (np.array([0.0, 0.0, 0.0]), QuantType.QInt8, False, 1.0, -128),
+        (np.array([0.0, 0.0, 0.0]), QuantType.QInt8, True, 1.0, 0),
+        (np.array([0.0, 0.0, 0.0]), QuantType.QUInt8, False, 1.0, 0),
+        # Edge case: single positive value
+        (np.array([0.0, 0.0, 5.0]), QuantType.QInt8, False, 5.0 / 255, -128),
+        (np.array([0.0, 0.0, 5.0]), QuantType.QInt8, True, 10.0 / 254, 0),
+        # Edge case: max_val is 0, min_val is negative
+        (np.array([-5.0, -2.0, 0.0]), QuantType.QInt8, False, 5.0 / 255, 127),
+        (np.array([-5.0, -2.0, 0.0]), QuantType.QInt8, True, 5.0 / 127, 0),
+        # Standard asymmetric signed
+        (np.array([-5.0, 0.0, 5.0]), QuantType.QInt8, False, 10.0 / 255, 0),
+        # Standard symmetric signed
+        (np.array([-10.0, -5.0, 5.0, 10.0]), QuantType.QInt8, True, 10.0 / 127, 0),
+        # Standard asymmetric unsigned
+        (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, False, 10.0 / 255, 0),
+        # Standard symmetric unsigned (with zero point != 0)
+        (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, True, 20.0 / 255, 128),
     ],
 )
-def test_quant_type(quant_type, symmetric, reduce_range, expected):
-    result = quant_type.qrange(symmetric, reduce_range)
-    assert result == expected
+def test_get_quantization_params_scalar(
+    fp_tensor, quant_type, symmetric, expected_scale, expected_zp
+):
+    """Test get_quantization_params with scalar (non per-channel) cases."""
+    scale, zero_point = get_quantization_params_from_tensor(
+        fp_tensor, quant_type, symmetric, reduce_range=False, per_channel=False, mse=False
+    )
+
+    # Scale should be positive
+    assert scale > 0
+    assert scale.size == 1
+
+    # Check expected scale
+    np.testing.assert_allclose(scale, np.array(expected_scale, dtype=np.float32), rtol=1e-5)
+
+    # Zero point should be scalar integer
+    assert zero_point.dtype == quant_type.np_dtype
+    assert zero_point.size == 1
+
+    # Check zero point range or exact value
+    np.testing.assert_allclose(zero_point, np.array(expected_zp, dtype=np.float32), rtol=1e-5)
+    qmin, qmax = quant_type.qrange(symmetric)
+    assert qmin <= zero_point <= qmax
 
 
 @pytest.mark.parametrize(
     "fp_tensor, quant_type, symmetric",
     [
-        # Asymmetric signed, 2D tensor for per-channel test
-        (np.array([[-1.0, 11.0, 1.0], [-2.0, 3.0, 2.0]]), QuantType.QInt8, False),
-        # Asymmetric unsigned, 2D tensor
-        (np.array([[-2.0, 1.0, 2.0], [1.0, 2.0, 3.0]]), QuantType.QUInt8, False),
-        # Symmetric signed, 2D tensor
-        (np.array([[-2.0, -1.0, 1.0], [2.0, 1.0, -1.0]]), QuantType.QInt8, True),
-        # Symmetric unsigned, 2D tensor
-        (np.array([[-4.0, 5.0, 10.0], [10.0, 5.0, 0.0]]), QuantType.QUInt8, True),
+        # Per-channel with mixed signs
+        (np.array([[-5.0, 0.0, 10.0], [-2.0, 5.0, 3.0]]), QuantType.QInt8, False),
+        # Per-channel with all positive
+        (np.array([[0.0, 5.0, 10.0], [1.0, 2.0, 3.0]]), QuantType.QUInt8, False),
+        # Per-channel symmetric
+        (np.array([[-10.0, -5.0, 5.0], [2.0, 1.0, -1.0]]), QuantType.QInt8, True),
+        # Per-channel edge case: one channel all zeros
+        (np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]]), QuantType.QInt8, False),
+    ],
+)
+@pytest.mark.parametrize("reduce_range", [False, True])
+def test_get_quantization_params_per_channel(fp_tensor, quant_type, symmetric, reduce_range):
+    """Test get_quantization_params with per-channel quantization."""
+    scale, zero_point = get_quantization_params_from_tensor(
+        fp_tensor, quant_type, symmetric, reduce_range, per_channel=True, mse=False
+    )
+
+    # Should return arrays with length equal to last dimension
+    expected_len = fp_tensor.shape[-1]
+    assert scale.shape == (expected_len,)
+    assert zero_point.shape == (expected_len,)
+
+    # All scales should be positive
+    assert np.all(scale > 0)
+
+    # Zero points should be integers
+    assert zero_point.dtype == quant_type.np_dtype
+
+    # Zero points should be within quantized range
+    qmin, qmax = quant_type.qrange(symmetric)
+    assert np.all(zero_point >= qmin)
+    assert np.all(zero_point <= qmax)
+
+
+@pytest.mark.parametrize(
+    "fp_tensor, symmetric",
+    [
+        # MSE with asymmetric
+        (np.array([[-1.0, 11.0, 1.0], [-2.0, 3.0, 2.0]]), False),
+        # MSE with symmetric
+        (np.array([[-10.0, -5.0, 5.0], [2.0, 1.0, -1.0]]), True),
     ],
 )
 @pytest.mark.parametrize("per_channel", [False, True])
-@pytest.mark.parametrize("mse", [False, True])
-@pytest.mark.parametrize("reduce_range", [False, True])
-def test_get_quantization_params_valid(
-    fp_tensor, quant_type, symmetric, per_channel, mse, reduce_range
-):
-    # TODO: Rework this test
+@pytest.mark.parametrize("quant_type", [QuantType.QInt8, QuantType.QUInt8])
+def test_get_quantization_params_mse(fp_tensor, quant_type, symmetric, per_channel):
+    """Test get_quantization_params with MSE optimization."""
     scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, quant_type, symmetric, reduce_range, per_channel, mse
+        fp_tensor, quant_type, symmetric, reduce_range=False, per_channel=per_channel, mse=True
     )
 
-    # scale is always positive
-    assert np.all(scale >= 0)
-
-    # zero_point must be integer or array of integers
-    assert np.issubdtype(zero_point.dtype, np.integer)
+    # Basic shape checks
     if per_channel:
-        # For per_channel, zero_point and scale should be arrays with length == fp_tensor.shape[-1]
         assert scale.shape == (fp_tensor.shape[-1],)
         assert zero_point.shape == (fp_tensor.shape[-1],)
     else:
-        assert np.isscalar(scale) and np.isscalar(zero_point)
+        assert scale.size == 1
+        assert zero_point.size == 1
 
+    # Scale should be positive
+    assert np.all(scale > 0)
 
-def test_asymmetric_behavior_qint8():
-    fp_tensor = np.array([-5.0, 0.0, 5.0])
-    scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, QuantType.QInt8, is_symmetric=False, per_channel=False
-    )
-
-    # Expected range from get_quantized_range: (-128, 127)
-    expected_scale = 0.0392156862745098
-    np.testing.assert_allclose(scale, expected_scale)
-    assert -128 <= zero_point <= 127
-
-
-def test_symmetric_behavior_qint8():
-    fp_tensor = np.array([-10.0, -5.0, 5.0, 10.0])
-    scale, zero_point = get_quantization_params_from_tensor(
-        fp_tensor, QuantType.QInt8, is_symmetric=True, per_channel=False
-    )
-
-    expected_scale = 0.07874015748031496
-    np.testing.assert_allclose(scale, expected_scale)
-    assert zero_point == 0
+    # Zero point should be integer and in range
+    assert zero_point.dtype == quant_type.np_dtype
+    qmin, qmax = quant_type.qrange(symmetric)
+    assert np.all(zero_point >= qmin)
+    assert np.all(zero_point <= qmax)
 
 
 @pytest.mark.parametrize(
