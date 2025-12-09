@@ -1,59 +1,10 @@
 import dataclasses
-import enum
 import warnings
 
 import numpy as np
 
-
-_DTYPE_RANGES = {
-    np.uint8: (0, 255),
-    np.int8: (-128, 127),
-    np.uint32: (0, 2**32 - 1),
-    np.int32: (-(2**31), 2**31 - 1),
-}
-
-_SYMMETRIC_RANGES = {
-    np.int8: (-127, 127),
-    np.int32: (-(2**31 - 1), 2**31 - 1),
-}
-
-_REDUCED_RANGES = {
-    np.uint8: (0, 127),
-    np.int8: (-64, 64),
-    np.uint32: (0, 2**31 - 1),
-    np.int32: (-(2**30), 2**30),
-}
-
-
-class QuantType(enum.Enum):
-    """Enumeration of quantization types."""
-
-    QInt8 = 0
-    QUInt8 = 1
-    QInt32 = 2
-    QUInt32 = 3
-
-    @property
-    def np_dtype(self):
-        if self == QuantType.QInt8:
-            return np.int8
-        if self == QuantType.QUInt8:
-            return np.uint8
-        if self == QuantType.QInt32:
-            return np.int32
-        if self == QuantType.QUInt32:
-            return np.uint32
-
-    def qrange(self, is_symmetric, reduce_range=False):
-        np_dtype = self.np_dtype
-        if reduce_range:
-            qrange = _REDUCED_RANGES.get(np_dtype)
-        elif is_symmetric and np_dtype in _SYMMETRIC_RANGES:
-            qrange = _SYMMETRIC_RANGES[np_dtype]
-        else:
-            qrange = _DTYPE_RANGES.get(np_dtype)
-
-        return qrange
+from onnx_quantize._dtypes import QuantType
+from onnx_quantize._pack import pack
 
 
 @dataclasses.dataclass
@@ -98,6 +49,8 @@ class QConfig:
     weights_dtype: QuantType = QuantType.QInt8
     weights_symmetric: bool = True
     weights_per_channel: bool = False
+
+    # GPTQ specific parameters
     use_gptq: bool = False
     block_size: int = 128
     percdamp: float = 0.01
@@ -245,7 +198,11 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce
             is_symmetric=False, reduce_range=reduce_range
         )
 
+        # Compute scale
         scale = (max_vals - min_vals) / (quantized_max - quantized_min)
+        scale = np.where(scale < np.finfo(max_vals.dtype).tiny, 1, scale)
+
+        # Compute zero point
         zero_point = quantized_min - (min_vals / scale)
         zero_point = np.round(np.clip(zero_point, quantized_min, quantized_max))
 
@@ -255,7 +212,16 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce
         quantized_min, quantized_max = quant_type.qrange(
             is_symmetric=True, reduce_range=reduce_range
         )
+
+        # Compute scale
         scale = (2 * max_vals) / (quantized_max - quantized_min)
+        scale = np.where(scale < np.finfo(max_vals.dtype).tiny, 1, scale)
+
+        # Compute zero point
+        # For symmetric quantization, zero point is always the middle of the range
+        # This is because symmetric quantization assumes zero is in the middle of the range
+        # Therefore, it is not always equal to 0, but it is the middle of the quantized range
+        # e.g., for QInt8, the zero point is 0, but for QUInt8, it is 128
         zero = np.multiply(
             np.ones(max_vals.shape), np.round((quantized_max + quantized_min) / 2.0)
         ).astype(quant_type.np_dtype)
@@ -309,7 +275,6 @@ def get_quantization_params_from_tensor(
         min_vals, max_vals = calculate_mse_min_max(
             fp_tensor, quant_type, is_symmetric, reduce_range, per_channel
         )
-
     return get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce_range)
 
 
@@ -319,7 +284,9 @@ def _linear_quantize(fp_tensor, quant_type, is_symmetric, reduce_range, scale, z
 
     quantized_min, quantized_max = quant_type.qrange(is_symmetric, reduce_range)
     q_tensor = np.clip(shifted_tensor, quantized_min, quantized_max)
-    q_tensor = q_tensor.astype(quant_type.np_dtype)
+
+    # Pack the quantized tensor (for 4 bits) or just cast into the appropriate data type
+    q_tensor = pack(q_tensor, quant_type)
 
     return q_tensor
 
