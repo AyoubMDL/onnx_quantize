@@ -206,7 +206,7 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce
         zero_point = quantized_min - (min_vals / scale)
         zero_point = np.round(np.clip(zero_point, quantized_min, quantized_max))
 
-        return scale.astype(np.float32), zero_point.astype(quant_type.np_dtype)
+        return scale.astype(np.float32), np.asarray(zero_point, dtype=quant_type.np_dtype)
 
     def _get_quantization_params_symmetric(max_vals, quant_type):
         quantized_min, quantized_max = quant_type.qrange(
@@ -222,11 +222,8 @@ def get_quantization_params(min_vals, max_vals, quant_type, is_symmetric, reduce
         # This is because symmetric quantization assumes zero is in the middle of the range
         # Therefore, it is not always equal to 0, but it is the middle of the quantized range
         # e.g., for QInt8, the zero point is 0, but for QUInt8, it is 128
-        zero = np.multiply(
-            np.ones(max_vals.shape), np.round((quantized_max + quantized_min) / 2.0)
-        ).astype(quant_type.np_dtype)
-
-        return scale.astype(np.float32), zero
+        zero = np.multiply(np.ones(max_vals.shape), np.round((quantized_max + quantized_min) / 2.0))
+        return scale.astype(np.float32), np.asarray(zero, dtype=quant_type.np_dtype)
 
     if is_symmetric:
         max_vals = np.maximum(np.abs(min_vals), np.abs(max_vals))

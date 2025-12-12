@@ -1,6 +1,8 @@
 import numpy as np
 import onnx
+import pytest
 
+from onnx_quantize.core import QuantType, dequantize_tensor, quantize_tensor
 from onnx_quantize.qfunctions import (
     QMatMulDynamic8bits,
     QMatMulStatic8bits,
@@ -68,3 +70,23 @@ def test_qmatmul_weights_only_output_shape_and_type():
     # Check function export
     function_proto = QMatMulWeightsOnly8bits.to_function_proto()
     onnx.checker.check_function(function_proto)
+
+
+@pytest.mark.parametrize("quant_type", [QuantType.QInt8, QuantType.QUInt8])
+@pytest.mark.parametrize("is_symmetric", [True, False])
+@pytest.mark.parametrize("per_channel", [True, False])
+def test_qmatmul_weights_only_outputs(rng, quant_type, is_symmetric, per_channel):
+    inputs = rng.uniform(low=-1.0, high=1.0, size=(2, 4)).astype(np.float32)
+    weights = rng.uniform(low=-1.0, high=1.0, size=(4, 4)).astype(np.float32)
+
+    w_q, w_scale, w_zero_point = quantize_tensor(
+        weights,
+        quant_type=quant_type,
+        is_symmetric=is_symmetric,
+        per_channel=per_channel,
+    )
+
+    # Run qfunction
+    result = QMatMulWeightsOnly8bits(inputs, w_q, w_scale, w_zero_point)
+    expected_output = np.matmul(inputs, dequantize_tensor(w_q, w_scale, w_zero_point))
+    np.testing.assert_allclose(result, expected_output, atol=1e-5)
