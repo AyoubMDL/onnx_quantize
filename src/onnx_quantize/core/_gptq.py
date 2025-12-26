@@ -1,15 +1,16 @@
-__all__ = ["gptq_quantize"]
+__all__ = ["_gptq_quantize"]
 
 import copy
 import math
 
 import numpy as np
 
-from onnx_quantize.core import (
-    QuantType,
-    _linear_quantize,
-    dequantize_tensor,
-    get_quantization_params_from_tensor,
+from onnx_quantize.core._dtypes import QuantType
+from onnx_quantize.core._qconfig import QuantizationStrategy
+from onnx_quantize.core._rtn import (
+    _compute_qparams_from_array,
+    _dequantize_array,
+    _quantize_array_from_qparams,
 )
 
 
@@ -17,6 +18,7 @@ def _gptq(
     W: np.array,
     H: np.array,
     quant_type=QuantType.QUInt8,
+    strategy=QuantizationStrategy.CHANNEL,
     group_size=32,
     is_symmetric=False,
     reduce_range=False,
@@ -25,21 +27,24 @@ def _gptq(
     percdamp=0.01,
     actorder=False,
     mse=False,
-    per_channel=True,
 ):
     # Create writable copies of the input arrays
     W = W.copy()
     H = H.copy()
 
     shape = W.shape
-    scale, zp = get_quantization_params_from_tensor(
-        W,
+    # TODO: change this
+    scale, zp = _compute_qparams_from_array(
+        W.T,
         quant_type=quant_type,
+        strategy=strategy,
+        group_size=-1,
         is_symmetric=is_symmetric,
-        per_channel=per_channel,
         clip_ratio=clip_ratio,
+        reduce_range=reduce_range,
         mse=mse,
     )
+    scale, zp = np.squeeze(scale), np.squeeze(zp)
 
     # mask dead hessian values
     dead = np.diag(H) == 0
@@ -84,20 +89,22 @@ def _gptq(
 
             if group_size != -1:
                 if (i1 + i) % group_size == 0:
-                    scale, zp = get_quantization_params_from_tensor(
-                        W[(i1 + i) : (i1 + i + group_size), :],
+                    scale, zp = _compute_qparams_from_array(
+                        W[(i1 + i) : (i1 + i + group_size), :].T,
                         quant_type=quant_type,
+                        strategy=strategy,
+                        group_size=-1,
                         is_symmetric=is_symmetric,
                         reduce_range=reduce_range,
-                        per_channel=per_channel,
                         clip_ratio=clip_ratio,
                         mse=mse,
                     )
+                    scale, zp = np.squeeze(scale), np.squeeze(zp)
 
-            q_int = _linear_quantize(
-                w, quant_type, is_symmetric, reduce_range, scale=scale, zero_point=zp
+            q_int = _quantize_array_from_qparams(
+                w, scale, zp, quant_type, is_symmetric, reduce_range
             ).flatten()
-            q = dequantize_tensor(q_int, scale, zp)
+            q = _dequantize_array(q_int, scale, zp)
 
             # propagate column error
             Q1[i, :] = q
@@ -149,10 +156,11 @@ def _accumulate_hessian(inp, H, num_samples):
     return H, num_samples
 
 
-def gptq_quantize(
+def _gptq_quantize(
     weights,
     inputs,
     quant_type=QuantType.QInt8,
+    strategy=QuantizationStrategy.CHANNEL,
     group_size=32,
     is_symmetric=False,
     reduce_range=False,
@@ -161,7 +169,6 @@ def gptq_quantize(
     percdamp=0.01,
     actorder=False,
     mse=False,
-    per_channel=True,
 ):
     """Quant the weight with GPTQ method.
 
@@ -169,6 +176,7 @@ def gptq_quantize(
         weights (np.array): weight.
         inputs (np.array): input activations.
         quant_type (QuantType, optional): quantization type. Default is QuantType.QInt8.
+        strategy (QuantizationStrategy, optional): quantization strategy. Default is CHANNEL.
         group_size (int, optional): how many elements share one scale/zp. Default is 32.
         is_symmetric (bool, optional): sym or asym. Defaults to False.
         reduce_range (bool, optional): Whether to use reduced range for quantization.
@@ -192,6 +200,7 @@ def gptq_quantize(
         weights,
         H,
         quant_type=quant_type,
+        strategy=strategy,
         is_symmetric=is_symmetric,
         reduce_range=reduce_range,
         clip_ratio=clip_ratio,
@@ -200,7 +209,6 @@ def gptq_quantize(
         percdamp=percdamp,
         actorder=actorder,
         mse=mse,
-        per_channel=per_channel,
     )
 
     return w_q, w_scale, w_zero_point

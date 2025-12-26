@@ -1,6 +1,8 @@
+__all__ = ["pack", "unpack"]
+
 import numpy as np
 
-from onnx_quantize._dtypes import QuantType
+from onnx_quantize.core._dtypes import QuantType
 
 
 def _pack_4bitx2(array):

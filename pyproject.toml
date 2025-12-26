@@ -9,7 +9,7 @@ description = "ONNX Quantization Framework"
 authors = [{ name = "Ayoub Bih", email = "ayoubbih119@gmail.com" }]
 requires-python = ">=3.10"
 
-dependencies = ["onnxscript", "onnxruntime"]
+dependencies = ["onnxscript", "onnxruntime", "pydantic>=2.0"]
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -25,7 +25,7 @@ line-length = 100
 # Rule “bundles” to run (E=pycodestyle errors, F=pyflakes, I=isort, D=docstring‑convention,  
 # UP=pyupgrade, B=bugbear, C4=flake8‑comprehensions)
 select = ["E", "F", "I", "D", "UP", "B", "C4"]
-per-file-ignores = { "__init__.py" = ["F401", "F403"], "test/onnx_quantize/*" = ["D"]}
+per-file-ignores = { "__init__.py" = ["F401", "F403"], "test/*" = ["D"]}
 
 ignore = [
   "D100",  # Missing module docstring
