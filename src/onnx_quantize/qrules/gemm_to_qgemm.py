@@ -1,6 +1,6 @@
 import onnx_ir as ir
 
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig, QuantizationStrategy
+from onnx_quantize.core._qconfig import GPTQConfig, QuantizationStrategy
 from onnx_quantize.core._rtn import _quantize_bias
 from onnx_quantize.qfunctions import QUANT_OPSET
 from onnx_quantize.qfunctions.qgemm import _make_qgemm_weight_only_grouped
@@ -120,13 +120,7 @@ class GemmBiasToQGemmBias(GemmToQGemm):
         )
 
     def rewrite(self, op, x, w, b, out):
-        node = out.producer()
-        qconfig = QConfig(**node.meta["qconfig"])
-        if qconfig.weights_only:
-            return self._rewrite_weights_only(op, x, w, b, out, qconfig)
-        elif qconfig.is_static:
-            return self._rewrite_static(op, x, w, b, out, qconfig)
-        return self._rewrite_dynamic(op, x, w, b, qconfig)
+        return self._rewrite(op, x, w, b, out)
 
 
 gemm_to_qgemm_rules = [GemmBiasToQGemmBias().rule(), GemmToQGemm().rule()]

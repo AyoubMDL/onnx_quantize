@@ -1,7 +1,7 @@
 from onnxruntime import InferenceSession
 
 
-def onnx_forward_on_models(*models, samples, sess_options=None, seed=None):
+def onnx_forward_on_models(*models, samples, sess_options=None):
     assert len(models) > 0
 
     outputs = []
