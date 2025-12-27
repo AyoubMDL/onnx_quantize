@@ -3,13 +3,14 @@ import onnx_ir as ir
 import onnxscript
 
 from onnx_quantize.core._gptq import _gptq_quantize
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig, QuantizationStrategy
+from onnx_quantize.core._qconfig import GPTQConfig, QuantizationStrategy
 from onnx_quantize.core._rtn import _quantize_array
 from onnx_quantize.qfunctions import QUANT_OPSET
 from onnx_quantize.qfunctions.qmatmul import _make_qmatmul_weight_only_grouped
+from onnx_quantize.qrules.base import QRewriter
 
 
-class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
+class MatMulToQMatMul(QRewriter):
     """Rewrites MatMul nodes to QMatMul nodes."""
 
     def pattern(self, op, x, w):
@@ -22,15 +23,6 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         if ir.convenience.get_const_tensor(w) is None:
             return check_result.fail("Weight is not a constant tensor.")
         return check_result
-
-    def rewrite(self, op, x, w, out):
-        node = out.producer()
-        qconfig = QConfig(**node.meta["qconfig"])
-        if qconfig.weights_only:
-            return self._rewrite_weights_only(op, x, w, out, qconfig)
-        elif qconfig.is_static:
-            return self._rewrite_static(op, x, w, out, qconfig)
-        return self._rewrite_dynamic(op, x, w, qconfig)
 
     def _quantize_gptq(self, op, x, w, inputs, qconfig):
         w_q, w_scale, w_zero_point = _gptq_quantize(
@@ -146,6 +138,9 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
             _domain=QUANT_OPSET.domain,
             _version=QUANT_OPSET.version,
         )
+
+    def rewrite(self, op, x, w, out):
+        return self._rewrite(op, x, w, out)
 
 
 matmul_to_qmatmul_rules = [MatMulToQMatMul().rule()]
