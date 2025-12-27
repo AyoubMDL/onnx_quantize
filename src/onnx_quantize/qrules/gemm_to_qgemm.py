@@ -1,7 +1,9 @@
 import onnx_ir as ir
 
-from onnx_quantize.core import QConfig, quantize_bias
+from onnx_quantize.core._qconfig import GPTQConfig, QConfig, QuantizationStrategy
+from onnx_quantize.core._rtn import _quantize_bias
 from onnx_quantize.qfunctions import QUANT_OPSET
+from onnx_quantize.qfunctions.qgemm import _make_qgemm_weight_only_grouped
 from onnx_quantize.qrules.matmul_to_qmatmul import MatMulToQMatMul
 
 
@@ -38,7 +40,7 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             return check_result.fail("Bias is not a constant tensor.")
         return check_result
 
-    def _rewrite_static(self, op, x, w, b, out):
+    def _rewrite_static(self, op, x, w, b, out, qconfig):
         node = out.producer()
 
         # 1. get input scale and zero_point from calibrated model
@@ -48,9 +50,8 @@ class GemmBiasToQGemmBias(GemmToQGemm):
         )
 
         # 2. Quantize the weights and bias
-        qconfig = QConfig(**node.meta["qconfig"])
         w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
-        b_q, _, _ = quantize_bias(
+        b_q, _, _ = _quantize_bias(
             b.const_value.numpy(), node.meta["input_scale"], w_scale.const_value.numpy()
         )
         b_q = op.initializer(ir.tensor(b_q), name=b.name)
@@ -67,11 +68,8 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             _version=QUANT_OPSET.version,
         )
 
-    def _rewrite_dynamic(self, op, x, w, b, out):
-        node = out.producer()
-
-        # 2. Quantize the weights
-        qconfig = QConfig(**node.meta["qconfig"])
+    def _rewrite_dynamic(self, op, x, w, b, qconfig):
+        # 1. Quantize the weights
         w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
         return op.QGemmDynamic8bits(
@@ -84,18 +82,34 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             _version=QUANT_OPSET.version,
         )
 
-    def _rewrite_weights_only(self, op, x, w, b, out):
+    def _rewrite_weights_only(self, op, x, w, b, out, qconfig):
         node = out.producer()
 
-        # 2. Quantize the weights
-        qconfig = QConfig(**node.meta["qconfig"])
-
-        if qconfig.use_gptq:
+        # 1. Quantize the weights
+        if isinstance(qconfig.algorithm, GPTQConfig):
             w_q, w_scale, w_zero_point = self._quantize_gptq(op, x, w, node.meta["input"], qconfig)
         else:
             w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
-        return op.QGemmWeightsOnly8bits(
+        if qconfig.strategy == QuantizationStrategy.GROUP:
+            # This will register a new QFunction for this group size
+            _make_qgemm_weight_only_grouped(qconfig.group_size)
+            original_transposed_shape = op.initializer(
+                ir.tensor(w.const_value.numpy().T.shape, dtype=ir.DataType.INT64),
+                name=f"{w.name}/original_transposed_shape",
+            )
+            return op.QGemmWeightsOnlyGrouped(
+                x,
+                w_q,
+                b,
+                w_scale,
+                w_zero_point,
+                original_transposed_shape,
+                _domain=QUANT_OPSET.domain,
+                _version=QUANT_OPSET.version,
+            )
+
+        return op.QGemmWeightsOnly(
             x,
             w_q,
             b,
@@ -109,10 +123,10 @@ class GemmBiasToQGemmBias(GemmToQGemm):
         node = out.producer()
         qconfig = QConfig(**node.meta["qconfig"])
         if qconfig.weights_only:
-            return self._rewrite_weights_only(op, x, w, b, out)
+            return self._rewrite_weights_only(op, x, w, b, out, qconfig)
         elif qconfig.is_static:
-            return self._rewrite_static(op, x, w, b, out)
-        return self._rewrite_dynamic(op, x, w, b, out)
+            return self._rewrite_static(op, x, w, b, out, qconfig)
+        return self._rewrite_dynamic(op, x, w, b, qconfig)
 
 
 gemm_to_qgemm_rules = [GemmBiasToQGemmBias().rule(), GemmToQGemm().rule()]

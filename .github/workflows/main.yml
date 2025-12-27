@@ -50,7 +50,7 @@ jobs:
         python -m pip install '.[test]'
     - name: Run tests
       run: |
-        pytest test --ignore=test/onnx_quantize/integration/
+        pytest test --ignore=test/integration/
 
   integration-tests:
     name: Integration Tests (Nightly)
@@ -71,7 +71,7 @@ jobs:
           python -m pip install '.[integration]'
       - name: Run integration tests
         run: |
-          pytest test/onnx_quantize/integration/
+          pytest test/integration/
   
   build:
     name: Build

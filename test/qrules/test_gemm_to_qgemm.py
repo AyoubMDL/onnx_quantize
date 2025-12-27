@@ -5,14 +5,24 @@ import onnxscript
 import pytest
 
 from onnx_quantize import QConfig, QuantType
-from onnx_quantize.calibrate import calibrate_model
+from onnx_quantize.core._calibrate import calibrate_model
 from onnx_quantize.qrules.gemm_to_qgemm import gemm_to_qgemm_rules
 from onnx_quantize.quantize import _add_qconfig_to_nodes
 
 
 @pytest.mark.parametrize("is_static", [True, False])
-@pytest.mark.parametrize("weights_only", [True, False])
-def test_gemm_to_qgemm(is_static, weights_only):
+@pytest.mark.parametrize(
+    "weights_only, strategy, group_size",
+    [
+        (True, "tensor", None),
+        (True, "tensor", None),
+        (True, "channel", None),
+        (True, "channel", None),
+        (True, "group", 16),
+        (True, "group", 8),
+    ],
+)
+def test_gemm_to_qgemm(is_static, weights_only, strategy, group_size):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -31,7 +41,11 @@ def test_gemm_to_qgemm(is_static, weights_only):
     clone = ir.from_proto(ir.to_proto(model))
 
     qconfig = QConfig(
-        is_static=is_static, weights_only=weights_only, weights_dtype=QuantType.QUInt8
+        is_static=is_static,
+        weights_only=weights_only,
+        weights_dtype=QuantType.QUInt8,
+        strategy=strategy,
+        group_size=group_size,
     )
 
     if is_static and not weights_only:
@@ -44,10 +58,14 @@ def test_gemm_to_qgemm(is_static, weights_only):
         for org_node, node in zip(clone.graph, model.graph, strict=True):
             # Check for bias
             if len(org_node.inputs) == 3:
-                assert node.op_type == "QGemmWeightsOnly8bits"
+                expected_op_type = "QGemmWeightsOnly"
             else:
-                assert node.op_type == "QMatMulWeightsOnly8bits"
+                expected_op_type = "QMatMulWeightsOnly"
 
+            if strategy == "group":
+                expected_op_type += "Grouped"
+
+            assert node.op_type == expected_op_type
     elif is_static:
         for org_node, node in zip(clone.graph, model.graph, strict=True):
             # Check for bias

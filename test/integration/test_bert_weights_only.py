@@ -19,10 +19,7 @@ def test_quantize_bert_weights_only(tmp_path):
     model = onnx.load(tmp_path / "model.onnx")
 
     qconfig = QConfig(
-        weights_only=True,
-        weights_dtype=QuantType.QUInt8,
-        weights_symmetric=True,
-        weights_per_channel=False,
+        weights_only=True, weights_dtype=QuantType.QUInt8, weights_symmetric=True, strategy="tensor"
     )
     qmodel = quantize(model, qconfig)
     onnx.save(qmodel, tmp_path / "quantized_model.onnx")

@@ -1,7 +1,7 @@
 import onnx_ir as ir
-from onnxscript import opset20 as op
 from onnxscript import script
 
+from onnx_quantize.opset import op
 from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
 
 
@@ -57,7 +57,7 @@ def QGemmDynamic8bits(X, W, B, w_scale, w_zero_point):
 
 @register_qfunction(target_optype="Gemm")
 @script(opset=QUANT_OPSET)
-def QGemmWeightsOnly8bits(X, W, B, w_scale, w_zero_point):
+def QGemmWeightsOnly(X, W, B, w_scale, w_zero_point):
     """Weights only Quantized MatMul using ONNX ops."""
     # Dequantize weights
     dequantized_weights = op.DequantizeLinear(W, w_scale, w_zero_point)
@@ -66,3 +66,22 @@ def QGemmWeightsOnly8bits(X, W, B, w_scale, w_zero_point):
     out_matmul = op.Gemm(X, dequantized_weights, B)
 
     return out_matmul
+
+
+def _make_qgemm_weight_only_grouped(group_size):
+    @register_qfunction(target_optype="Gemm")
+    @script(opset=QUANT_OPSET)
+    def QGemmWeightsOnlyGrouped(X, W, B, w_scale, w_zero_point, original_transposed_shape):
+        # (in_channels, out_channels) -> (out_channels x num_groups, group_size)
+        W = op.Reshape(op.Transpose(W, perm=[1, 0]), op.Constant(value_ints=[-1, group_size]))
+        dequantized_weights = op.DequantizeLinear(W, w_scale, w_zero_point, block_size=group_size)
+
+        # Reshape back to original and transpose
+        # (out_channels x num_groups, group_size) -> (in_channels, out_channels)
+        dequantized_weights = op.Transpose(
+            op.Reshape(dequantized_weights, original_transposed_shape),
+            perm=[1, 0],
+        )
+        return op.Gemm(X, dequantized_weights, B)
+
+    return QGemmWeightsOnlyGrouped

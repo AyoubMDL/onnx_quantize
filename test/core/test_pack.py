@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from onnx_quantize import QuantType
-from onnx_quantize._pack import pack, unpack
+from onnx_quantize.core._pack import pack, unpack
 
 
 class TestPackUnpackInt4:

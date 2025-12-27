@@ -3,8 +3,8 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize.calibrate import OP_TYPES_TO_QUANTIZE, calibrate_model
-from onnx_quantize.core import QConfig
+from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
+from onnx_quantize.core import calibrate_model
 
 
 def _get_test_model():
@@ -28,7 +28,7 @@ def _get_test_model():
 def test_calibrate_model_with_samples(num_samples):
     calibration_data = np.random.randn(num_samples, 32).astype(np.float32)
     qconfig = QConfig(is_static=True, calibration_data=calibration_data)
-    ir_model = calibrate_model(_get_test_model(), qconfig)
+    ir_model = calibrate_model(_get_test_model(), qconfig, OP_TYPES_TO_QUANTIZE)
 
     # Check that expected nodes have quantization params
     for node in ir_model.graph:
@@ -39,10 +39,20 @@ def test_calibrate_model_with_samples(num_samples):
 
 def test_calibrate_model_random_samples():
     qconfig = QConfig(is_static=True)
-    ir_model = calibrate_model(_get_test_model(), qconfig)
+    ir_model = calibrate_model(_get_test_model(), qconfig, OP_TYPES_TO_QUANTIZE)
 
     # Check that expected nodes have quantization params
     for node in ir_model.graph:
         if node.op_type in OP_TYPES_TO_QUANTIZE:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
+
+
+def test_calibrate_model_gptq():
+    qconfig = QConfig(algorithm=GPTQConfig())
+    ir_model = calibrate_model(_get_test_model(), qconfig, OP_TYPES_TO_QUANTIZE)
+
+    # Check that expected nodes have quantization params
+    for node in ir_model.graph:
+        if node.op_type in OP_TYPES_TO_QUANTIZE:
+            assert "input" in node.meta

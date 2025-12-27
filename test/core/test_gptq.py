@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from onnx_quantize import QuantType
-from onnx_quantize.gptq import gptq_quantize
+from onnx_quantize import QuantizationStrategy, QuantType
+from onnx_quantize.core._gptq import _gptq_quantize
 
 
 @pytest.fixture
@@ -25,10 +25,11 @@ def simple_inputs(rng):
 def test_gptq_quantize(
     simple_weights, simple_inputs, block_size, group_size, percdamp, actorder, mse
 ):
-    w_q, w_scale, w_zero_point = gptq_quantize(
+    w_q, w_scale, w_zero_point = _gptq_quantize(
         simple_weights,
         simple_inputs,
         group_size=group_size,
+        strategy=QuantizationStrategy.TENSOR,
         block_size=block_size,
         percdamp=percdamp,
         actorder=actorder,
@@ -53,7 +54,9 @@ def test_gptq_quantize(
 @pytest.mark.parametrize("quant_type", [QuantType.QInt8, QuantType.QUInt8])
 def test_quantization_types(simple_weights, simple_inputs, quant_type):
     """Test different quantization types."""
-    w_q, w_scale, w_zero_point = gptq_quantize(simple_weights, simple_inputs, quant_type=quant_type)
+    w_q, w_scale, w_zero_point = _gptq_quantize(
+        simple_weights, simple_inputs, quant_type=quant_type, strategy=QuantizationStrategy.TENSOR
+    )
 
     # Check correct dtype
     assert w_q.dtype == quant_type.np_dtype
@@ -71,8 +74,12 @@ def test_quantization_types(simple_weights, simple_inputs, quant_type):
 @pytest.mark.parametrize("reduce_range", [True, False])
 @pytest.mark.parametrize("clip_ratio", [0.9, 0.95, 1.0])
 def test_reduce_range_clip_ratio(simple_weights, simple_inputs, reduce_range, clip_ratio):
-    w_q, _, _ = gptq_quantize(
-        simple_weights, simple_inputs, reduce_range=reduce_range, clip_ratio=clip_ratio
+    w_q, _, _ = _gptq_quantize(
+        simple_weights,
+        simple_inputs,
+        strategy=QuantizationStrategy.TENSOR,
+        reduce_range=reduce_range,
+        clip_ratio=clip_ratio,
     )
 
     assert w_q.shape == simple_weights.shape
@@ -87,16 +94,18 @@ def test_reduce_range_clip_ratio(simple_weights, simple_inputs, reduce_range, cl
         assert np.all(w_q <= 127)
 
 
-@pytest.mark.parametrize("per_channel", [True, False])
-def test_per_channel_quantization(simple_weights, simple_inputs, per_channel):
+@pytest.mark.parametrize("strategy", [QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL])
+def test_per_channel_quantization(simple_weights, simple_inputs, strategy):
     """Test per-channel vs per-tensor quantization."""
-    w_q, w_scale, w_zero_point = gptq_quantize(
-        simple_weights, simple_inputs, per_channel=per_channel
+    w_q, w_scale, w_zero_point = _gptq_quantize(
+        simple_weights,
+        simple_inputs,
+        strategy=strategy,
     )
 
     assert w_q.shape == simple_weights.shape
 
-    if per_channel and len(simple_weights.shape) > 1:
+    if strategy == QuantizationStrategy.CHANNEL and len(simple_weights.shape) > 1:
         # Per-channel should have scale/zp per output channel
         assert w_scale.size > 1
         assert w_zero_point.size > 1

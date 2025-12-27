@@ -2,9 +2,11 @@ import numpy as np
 import onnx_ir as ir
 import onnxscript
 
-from onnx_quantize.core import QConfig, quantize_tensor
-from onnx_quantize.gptq import gptq_quantize
+from onnx_quantize.core._gptq import _gptq_quantize
+from onnx_quantize.core._qconfig import GPTQConfig, QConfig, QuantizationStrategy
+from onnx_quantize.core._rtn import _quantize_array
 from onnx_quantize.qfunctions import QUANT_OPSET
+from onnx_quantize.qfunctions.qmatmul import _make_qmatmul_weight_only_grouped
 
 
 class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
@@ -25,25 +27,25 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         node = out.producer()
         qconfig = QConfig(**node.meta["qconfig"])
         if qconfig.weights_only:
-            return self._rewrite_weights_only(op, x, w, out)
+            return self._rewrite_weights_only(op, x, w, out, qconfig)
         elif qconfig.is_static:
-            return self._rewrite_static(op, x, w, out)
-        return self._rewrite_dynamic(op, x, w, out)
+            return self._rewrite_static(op, x, w, out, qconfig)
+        return self._rewrite_dynamic(op, x, w, qconfig)
 
     def _quantize_gptq(self, op, x, w, inputs, qconfig):
-        w_q, w_scale, w_zero_point = gptq_quantize(
+        w_q, w_scale, w_zero_point = _gptq_quantize(
             w.const_value.numpy(),
             inputs,
             quant_type=qconfig.weights_dtype,
+            strategy=qconfig.strategy,
+            group_size=qconfig.algorithm.group_size,
             is_symmetric=qconfig.weights_symmetric,
             reduce_range=qconfig.reduce_range,
             clip_ratio=qconfig.clip_ratio,
-            group_size=qconfig.group_size,
-            block_size=qconfig.block_size,
-            percdamp=qconfig.percdamp,
-            actorder=qconfig.actorder,
+            block_size=qconfig.algorithm.block_size,
+            percdamp=qconfig.algorithm.percdamp,
+            actorder=qconfig.algorithm.actorder,
             mse=qconfig.mse,
-            per_channel=qconfig.weights_per_channel,
         )
 
         w_q = op.initializer(ir.tensor(w_q), name=w.name)
@@ -55,25 +57,24 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         return w_q, w_scale, w_zero_point
 
     def _quantize_weights(self, op, x, w, qconfig):
-        w_q, w_scale, w_zero_point = quantize_tensor(
+        w_q, w_scale, w_zero_point = _quantize_array(
             w.const_value.numpy(),
             qconfig.weights_dtype,
+            strategy=qconfig.strategy,
+            group_size=qconfig.group_size,
             is_symmetric=qconfig.weights_symmetric,
             reduce_range=qconfig.reduce_range,
-            per_channel=qconfig.weights_per_channel,
             clip_ratio=qconfig.clip_ratio,
             mse=qconfig.mse,
         )
 
         w_q = op.initializer(ir.tensor(w_q), name=w.name)
-        w_scale = op.initializer(ir.tensor(np.squeeze(w_scale)), name=f"{x.name}/w_scale")
-        w_zero_point = op.initializer(
-            ir.tensor(np.squeeze(w_zero_point)), name=f"{x.name}/w_zero_point"
-        )
+        w_scale = op.initializer(ir.tensor(w_scale), name=f"{x.name}/w_scale")
+        w_zero_point = op.initializer(ir.tensor(w_zero_point), name=f"{x.name}/w_zero_point")
 
         return w_q, w_scale, w_zero_point
 
-    def _rewrite_static(self, op, x, w, out):
+    def _rewrite_static(self, op, x, w, out, qconfig):
         node = out.producer()
 
         # 1. get input scale and zero_point from calibrated model
@@ -83,7 +84,6 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
         )
 
         # 2. Quantize the weights
-        qconfig = QConfig(**node.meta["qconfig"])
         w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
         return op.QMatMulStatic8bits(
@@ -97,11 +97,8 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
             _version=QUANT_OPSET.version,
         )
 
-    def _rewrite_dynamic(self, op, x, w, out):
-        node = out.producer()
-
-        # 2. Quantize the weights
-        qconfig = QConfig(**node.meta["qconfig"])
+    def _rewrite_dynamic(self, op, x, w, qconfig):
+        # 1. Quantize the weights
         w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
         return op.QMatMulDynamic8bits(
@@ -113,22 +110,39 @@ class MatMulToQMatMul(onnxscript.rewriter.RewriteRuleClassBase):
             _version=QUANT_OPSET.version,
         )
 
-    def _rewrite_weights_only(self, op, x, w, out):
+    def _rewrite_weights_only(self, op, x, w, out, qconfig):
         node = out.producer()
 
-        # 2. Quantize the weights
-        qconfig = QConfig(**node.meta["qconfig"])
-
-        if qconfig.use_gptq:
+        # 1. Quantize the weights
+        if isinstance(qconfig.algorithm, GPTQConfig):
             w_q, w_scale, w_zero_point = self._quantize_gptq(op, x, w, node.meta["input"], qconfig)
         else:
             w_q, w_scale, w_zero_point = self._quantize_weights(op, x, w, qconfig)
 
-        return op.QMatMulWeightsOnly8bits(
+        if qconfig.strategy == QuantizationStrategy.GROUP:
+            # This will register a new QFunction for this group size
+            _make_qmatmul_weight_only_grouped(qconfig.group_size)
+            original_transposed_shape = op.initializer(
+                ir.tensor(w.const_value.numpy().T.shape, dtype=ir.DataType.INT64),
+                name=f"{w.name}/original_transposed_shape",
+            )
+            return op.QMatMulWeightsOnlyGrouped(
+                x,
+                w_q,
+                w_scale,
+                w_zero_point,
+                original_transposed_shape,
+                num_bits=qconfig.weights_dtype.bitwidth,
+                _domain=QUANT_OPSET.domain,
+                _version=QUANT_OPSET.version,
+            )
+
+        return op.QMatMulWeightsOnly(
             x,
             w_q,
             w_scale,
             w_zero_point,
+            num_bits=qconfig.weights_dtype.bitwidth,
             _domain=QUANT_OPSET.domain,
             _version=QUANT_OPSET.version,
         )
