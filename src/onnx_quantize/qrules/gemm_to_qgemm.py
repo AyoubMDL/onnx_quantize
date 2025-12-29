@@ -3,7 +3,10 @@ import onnx_ir as ir
 from onnx_quantize.core._qconfig import GPTQConfig, QuantizationStrategy
 from onnx_quantize.core._rtn import _quantize_bias
 from onnx_quantize.qfunctions import QUANT_OPSET
-from onnx_quantize.qfunctions.qgemm import _make_qgemm_weight_only_grouped
+from onnx_quantize.qfunctions.qgemm import (
+    _make_qgemm_weight_only_grouped,
+    _make_qgemm_weight_only_grouped_4bits,
+)
 from onnx_quantize.qrules.matmul_to_qmatmul import MatMulToQMatMul
 
 
@@ -93,7 +96,12 @@ class GemmBiasToQGemmBias(GemmToQGemm):
 
         if qconfig.strategy == QuantizationStrategy.GROUP:
             # This will register a new QFunction for this group size
-            _make_qgemm_weight_only_grouped(qconfig.group_size)
+            # Special case for grouped 4bits as ort doesn't support Reshape with 4bits inputs
+            if qconfig.weights_dtype.bitwidth == 4:
+                _make_qgemm_weight_only_grouped_4bits(qconfig.group_size)
+            else:
+                _make_qgemm_weight_only_grouped(qconfig.group_size)
+
             original_transposed_shape = op.initializer(
                 ir.tensor(w.const_value.numpy().T.shape, dtype=ir.DataType.INT64),
                 name=f"{w.name}/original_transposed_shape",

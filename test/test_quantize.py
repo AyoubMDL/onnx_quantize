@@ -79,6 +79,11 @@ def _get_matmul_add_model(rng):
         (True, "uint8", False, "int8", True),
         (False, "uint8", False, "uint8", False),
         (False, "uint8", False, "uint8", False),
+        # 4bits (note it is only for weight only quantization)
+        (False, "uint8", False, "uint4", False),
+        (False, "uint8", False, "uint4", True),
+        (False, "uint8", False, "int4", False),
+        (False, "uint8", False, "int4", True),
     ],
 )
 @pytest.mark.parametrize(
@@ -104,8 +109,9 @@ def test_quantize(
     weights_symmetric,
     algorithm_config,
 ):
-    if strategy == "group":
-        weights_only = True  # Group quantization only applies to weights
+    if strategy == "group" or weights_dtype in ("int4", "uint4"):
+        # 4bits and group quantization only apply to weights
+        weights_only = True
 
     if isinstance(algorithm_config, GPTQConfig) and strategy == "group":
         strategy = "channel"  # GPTQ only supports per-tensor/channel quantization
@@ -141,4 +147,5 @@ def test_quantize(
     # Use calibration data if available, otherwise generate new test data
     data = calibration_data if calibration_data is not None else _truncated_normal(rng, (2, 32))
     original_output, quantized_output = onnx_forward_on_models(model, qmodel, samples={"X": data})
+
     np.testing.assert_allclose(original_output, quantized_output, atol=1e-1)
