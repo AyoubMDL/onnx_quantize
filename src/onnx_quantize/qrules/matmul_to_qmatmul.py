@@ -6,7 +6,10 @@ from onnx_quantize.core._gptq import _gptq_quantize
 from onnx_quantize.core._qconfig import GPTQConfig, QuantizationStrategy
 from onnx_quantize.core._rtn import _quantize_array
 from onnx_quantize.qfunctions import QUANT_OPSET
-from onnx_quantize.qfunctions.qmatmul import _make_qmatmul_weight_only_grouped
+from onnx_quantize.qfunctions.qmatmul import (
+    _make_qmatmul_weight_only_grouped,
+    _make_qmatmul_weight_only_grouped_4bits,
+)
 from onnx_quantize.qrules.base import QRewriter
 
 
@@ -113,7 +116,11 @@ class MatMulToQMatMul(QRewriter):
 
         if qconfig.strategy == QuantizationStrategy.GROUP:
             # This will register a new QFunction for this group size
-            _make_qmatmul_weight_only_grouped(qconfig.group_size)
+            # Special case for grouped 4bits as ort doesn't support Reshape with 4bits inputs
+            if qconfig.weights_dtype.bitwidth == 4:
+                _make_qmatmul_weight_only_grouped_4bits(qconfig.group_size)
+            else:
+                _make_qmatmul_weight_only_grouped(qconfig.group_size)
             original_transposed_shape = op.initializer(
                 ir.tensor(w.const_value.numpy().T.shape, dtype=ir.DataType.INT64),
                 name=f"{w.name}/original_transposed_shape",
