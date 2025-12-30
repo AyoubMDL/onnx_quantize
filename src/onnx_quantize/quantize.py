@@ -21,40 +21,45 @@ def _add_qconfig_to_nodes(ir_model, qconfig):
             node.meta["qconfig"] = qconfig.model_dump()
 
 
-def quantize(model: onnx.ModelProto, qconfig: QConfig) -> onnx.ModelProto:
+def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelProto | ir.Model:
     """Quantizes an ONNX model using calibration data.
 
     Args:
-        model (onnx.ModelProto): The ONNX model to be quantized
+        model (onnx.ModelProto | ir.Model): The ONNX model to be quantized
         qconfig (QConfig): Configuration for quantization parameters.
 
     Returns:
-        onnx.ModelProto: The quantized ONNX model.
+        onnx.ModelProto | ir.Model: The quantized ONNX model.
     """
     # Convert to IR model
-    ir_model = ir.from_proto(model)
+    is_proto = isinstance(model, onnx.ModelProto)
+    if is_proto:
+        model = ir.from_proto(model)
 
     # Optimize model before quantization
-    ir_model = onnxscript.optimizer.optimize(ir_model)
+    model = onnxscript.optimizer.optimize(model)
 
     # Run pre rules quant
-    ir_model = onnxscript.rewriter.rewrite(ir_model, pre_rules)
+    model = onnxscript.rewriter.rewrite(model, pre_rules)
 
     # Calibrate the model to compute quantization parameters
     if (qconfig.is_static and not qconfig.weights_only) or isinstance(
         qconfig.algorithm, GPTQConfig
     ):
-        ir_model = calibrate_model(ir_model, qconfig, OP_TYPES_TO_QUANTIZE)
+        model = calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
 
-    _add_qconfig_to_nodes(ir_model, qconfig)
+    _add_qconfig_to_nodes(model, qconfig)
 
     # Apply quantization rules to rewrite the model
-    ir_model = onnxscript.rewriter.rewrite(ir_model, qrules)
+    model = onnxscript.rewriter.rewrite(model, qrules)
 
     # Update opset version
-    onnxscript.version_converter.convert_version(ir_model, target_version=op.version)
+    onnxscript.version_converter.convert_version(model, target_version=op.version)
 
     # Add quantization functions to the model
-    ir_model.functions.update(get_qfunctions())
+    model.functions.update(get_qfunctions())
 
-    return ir.to_proto(ir_model)
+    if is_proto:
+        model = ir.to_proto(model)
+
+    return model

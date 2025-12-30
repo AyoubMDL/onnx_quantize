@@ -1,5 +1,6 @@
 import numpy as np
 import onnx
+import onnx_ir as ir
 import pytest
 
 from onnx_quantize import GPTQConfig, QConfig, quantize
@@ -68,7 +69,7 @@ def _get_matmul_add_model(rng):
     B2 = onnx.numpy_helper.from_array(_truncated_normal(rng, (128)), name="B2")
     model.graph.initializer.extend([W1, B1, W2, B2])
     onnx.checker.check_model(model, full_check=True)
-    return model
+    return ir.from_proto(model)
 
 
 @pytest.mark.parametrize(
@@ -139,6 +140,14 @@ def test_quantize(
 
     model = model_fn(rng)
     qmodel = quantize(model, qconfig)
+
+    # Check type consistency
+    assert isinstance(qmodel, type(model))
+
+    # Convert to proto for further checks
+    if isinstance(qmodel, ir.Model):
+        model = ir.to_proto(model)
+        qmodel = ir.to_proto(qmodel)
 
     # Check all nodes are quantized (Assumming all ops are quantized)
     assert all(node.domain == "quant" for node in qmodel.graph.node)
