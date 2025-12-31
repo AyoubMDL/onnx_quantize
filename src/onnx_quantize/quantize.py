@@ -37,6 +37,11 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
     Returns:
         onnx.ModelProto | ir.Model: The quantized ONNX model.
     """
+    if not isinstance(model, (onnx.ModelProto, ir.Model)):
+        raise TypeError(
+            f"model must be an instance of onnx.ModelProto or onnx_ir.Model, got {type(model)}"
+        )
+
     # Convert to IR model
     is_proto = isinstance(model, onnx.ModelProto)
     if is_proto:
