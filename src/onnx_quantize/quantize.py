@@ -2,6 +2,7 @@ __all__ = ["quantize"]
 
 import onnx
 import onnx_ir as ir
+import onnx_ir.passes.common as ir_passes
 import onnxscript
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
@@ -58,6 +59,9 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
 
     # Add quantization functions to the model
     model.functions.update(get_qfunctions())
+
+    # Remove unused functions
+    ir_passes.RemoveUnusedFunctionsPass()(model)
 
     if is_proto:
         model = ir.to_proto(model)
