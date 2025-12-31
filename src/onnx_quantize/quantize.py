@@ -1,7 +1,10 @@
 __all__ = ["quantize"]
 
+import logging
+
 import onnx
 import onnx_ir as ir
+import onnx_ir.passes.common as ir_passes
 import onnxscript
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
@@ -10,6 +13,9 @@ from onnx_quantize.opset import op
 from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import get_qfunctions
 from onnx_quantize.qrules import qrules
+
+
+logger = logging.getLogger(__name__)
 
 
 def _add_qconfig_to_nodes(ir_model, qconfig):
@@ -40,17 +46,20 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
     model = onnxscript.optimizer.optimize(model)
 
     # Run pre rules quant
+    logger.info("Applying pre-quantization rules...")
     model = onnxscript.rewriter.rewrite(model, pre_rules)
 
     # Calibrate the model to compute quantization parameters
     if (qconfig.is_static and not qconfig.weights_only) or isinstance(
         qconfig.algorithm, GPTQConfig
     ):
+        logger.info("Calibrating the model...")
         model = calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
 
     _add_qconfig_to_nodes(model, qconfig)
 
     # Apply quantization rules to rewrite the model
+    logger.info("Applying quantization rules...")
     model = onnxscript.rewriter.rewrite(model, qrules)
 
     # Update opset version
@@ -58,6 +67,9 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
 
     # Add quantization functions to the model
     model.functions.update(get_qfunctions())
+
+    # Remove unused functions
+    ir_passes.RemoveUnusedFunctionsPass()(model)
 
     if is_proto:
         model = ir.to_proto(model)
