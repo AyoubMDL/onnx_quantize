@@ -5,7 +5,7 @@ import onnxscript
 import pytest
 
 from onnx_quantize import QConfig, QuantType
-from onnx_quantize.core._calibrate import calibrate_model
+from onnx_quantize.core._calibration.calibrate import calibrate_model
 from onnx_quantize.qrules.gemm_to_qgemm import gemm_to_qgemm_rules
 from onnx_quantize.quantize import _add_qconfig_to_nodes
 

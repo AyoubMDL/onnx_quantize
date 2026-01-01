@@ -8,7 +8,7 @@ import onnx_ir.passes.common as ir_passes
 import onnxscript
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
-from onnx_quantize.core import calibrate_model, get_nodes_to_quantize
+from onnx_quantize.core._calibration.calibrate import calibrate_model, get_nodes_to_quantize
 from onnx_quantize.opset import op
 from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import get_qfunctions

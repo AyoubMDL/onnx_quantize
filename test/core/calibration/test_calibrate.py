@@ -4,7 +4,7 @@ import onnx_ir as ir
 import pytest
 
 from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
-from onnx_quantize.core import calibrate_model
+from onnx_quantize.core._calibration.calibrate import calibrate_model
 
 
 def _get_test_model():
