@@ -549,3 +549,21 @@ def test_qconfig_model_dump_json():
     assert isinstance(json_str, str)
     assert "0.95" in json_str
     assert "true" in json_str.lower()
+
+
+def test_qconfig_calibration_params():
+    """Test that calibration_params is a CalibrationParams instance."""
+    config = QConfig(calibration_params={"momentum": 0.9, "num_samples": 50, "batch_size": 5})
+    assert hasattr(config, "calibration_params")
+    assert config.calibration_params.momentum == 0.9
+    assert config.calibration_params.num_samples == 50
+    assert config.calibration_params.batch_size == 5
+
+
+def test_qconfig_calibration_params_default():
+    """Test that default calibration_params is used when none provided."""
+    config = QConfig()
+    assert hasattr(config, "calibration_params")
+    assert config.calibration_params.momentum == 0.0
+    assert config.calibration_params.num_samples == 100
+    assert config.calibration_params.method.value == "minmax"

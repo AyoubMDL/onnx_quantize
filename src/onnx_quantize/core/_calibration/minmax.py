@@ -1,6 +1,11 @@
+import logging
+
 import numpy as np
 
 from onnx_quantize.core._calibration.base import CalibrationData, Calibrator
+
+
+logger = logging.getLogger(__name__)
 
 
 class MinMaxCalibrator(Calibrator):
@@ -30,6 +35,7 @@ class MinMaxCalibrator(Calibrator):
         assert 0 <= momentum < 1, "Momentum must be in the range [0, 1)."
 
         self.momentum = momentum
+        logger.debug(f"Initialized MinMaxCalibrator with momentum={momentum}")
 
     def collect(self, name: str, array: np.ndarray) -> None:
         """Collect min/max statistics from an array.

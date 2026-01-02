@@ -4,12 +4,11 @@ from __future__ import annotations
 __all__ = ["QConfig", "QuantizationStrategy", "GPTQConfig"]
 
 from enum import Enum
-from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from onnx_quantize.core._calibration.base import CalibrationMethod
+from onnx_quantize.core._calibration.base import CalibrationParams
 from onnx_quantize.core._dtypes import QuantType
 
 
@@ -71,6 +70,8 @@ class QConfig(BaseModel):
         calibration_params (`Dict[str, Any] | None`, optional): Additional parameters
             for the calibration method. Defaults to `None`.
             - For MinMax: 'momentum' (float): momentum for exponential moving average.
+            - batch_size (int, optional): Number of samples per batch. Defaults to 10.
+            - num_samples (int, optional): Total number of samples to use. Defaults to 100.
         activations_dtype (`QuantType | str`, optional):
             The quantization data type to use for the activations.
             Defaults to `QuantType.QUInt8`.
@@ -100,8 +101,7 @@ class QConfig(BaseModel):
     strategy: QuantizationStrategy | str | None = None
     mse: bool = False
     calibration_data: np.ndarray | None = None
-    calibration_method: CalibrationMethod | str = CalibrationMethod.MINMAX
-    calibration_params: dict[str, Any] | None = None
+    calibration_params: CalibrationParams = Field(default_factory=CalibrationParams)
     activations_dtype: QuantType = QuantType.QUInt8
     activations_symmetric: bool = False
     weights_dtype: QuantType | str = QuantType.QInt8
@@ -142,16 +142,11 @@ class QConfig(BaseModel):
 
         return value
 
-    @field_validator("calibration_method", mode="before")
-    def validate_calibration_method(cls, value) -> CalibrationMethod:
-        if isinstance(value, str):
-            try:
-                return CalibrationMethod(value)
-            except ValueError:
-                valid_methods = [m.value for m in CalibrationMethod]
-                raise ValueError(  # noqa: B904
-                    f"Invalid calibration_method '{value}'. Valid methods are: {valid_methods}"
-                )
+    @field_validator("calibration_params", mode="before")
+    def validate_calibration_params(cls, value) -> CalibrationParams:
+        if isinstance(value, dict):
+            return CalibrationParams(**value)
+
         return value
 
     @field_validator("clip_ratio", mode="after")

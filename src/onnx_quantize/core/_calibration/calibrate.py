@@ -69,6 +69,39 @@ def _augment_model(ir_model: ir.Model, nodes_to_calibrate: list[ir.Node]):
                 ir_model.graph.outputs.remove(output)
 
 
+def _prepare_calibration_data(
+    calibration_data: np.ndarray, batch_size: int, num_samples: int, input_shape: list
+) -> np.ndarray:
+    """Prepare calibration data for mini-batch processing."""
+    if calibration_data is None:
+        logger.info("Generating random calibration data as none was provided.")
+        rng = np.random.default_rng(0)
+
+        # Generate random data of shape (num_samples, *input_shape[1:])
+        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in input_shape[1:]]
+        calibration_data = rng.standard_normal(size=shape).astype(np.float32)
+
+    total_samples = calibration_data.shape[0]
+
+    if num_samples > total_samples:
+        num_samples = total_samples
+
+    calibration_data = calibration_data[:num_samples]
+
+    if batch_size >= num_samples:
+        return calibration_data.reshape((1, num_samples, *calibration_data.shape[1:]))
+
+    # Reshape data into batches
+    # Drop excess samples that don't fit into a full batch
+    num_batches = num_samples // batch_size
+    calibration_data = calibration_data[: num_batches * batch_size]
+    calibration_data = calibration_data.reshape(
+        (num_batches, batch_size, *calibration_data.shape[1:])
+    )
+
+    return calibration_data
+
+
 def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: list) -> ir.Model:
     """Calibrates the model by computing scales and zero-points for specified nodes.
 
@@ -93,29 +126,32 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate:
         proto = ir.to_proto(ir_model)
         session = onnxruntime.InferenceSession(proto.SerializeToString())
 
+        # Extract calibration parameters
+        calibrator_params = qconfig.calibration_params.model_dump()
+        method = calibrator_params.pop("method")
+        batch_size = calibrator_params.pop("batch_size")
+        num_samples = calibrator_params.pop("num_samples")
+
         # Get Calibration Data or generate random data
-        calibration_data = qconfig.calibration_data
-        if calibration_data is None:
-            logger.info("Generating random calibration data as none was provided.")
-            calibration_data = np.random.randn(
-                *[d if isinstance(d, int) else 1 for d in session.get_inputs()[0].shape]
-            ).astype(np.float32)
+        calibration_data = _prepare_calibration_data(
+            qconfig.calibration_data, batch_size, num_samples, session.get_inputs()[0].shape
+        )
 
         # Create calibrator based on configuration
-        calibrator_params = qconfig.calibration_params or {}
-        calibrator = get_calibrator(qconfig.calibration_method, **calibrator_params)
+        calibrator = get_calibrator(method, **calibrator_params)
 
         # Run inference and collect outputs
-        inputs_dict = {session.get_inputs()[0].name: calibration_data}
-        ort_outs = session.run(inputs_to_calibre, inputs_dict)
+        for batch in calibration_data:
+            inputs_dict = {session.get_inputs()[0].name: batch}
+            ort_outs = session.run(inputs_to_calibre, inputs_dict)
 
-        # Construct a dict containing output name and output arrays
-        # This used for gptq as it needs to access the full collected data
-        collected_outputs = {}
-        for name, out in zip(inputs_to_calibre, ort_outs, strict=True):
-            collected_outputs[name] = out
-            # Collect calibration data for each array
-            calibrator.collect(name, out)
+            # Construct a dict containing output name and output arrays
+            # collected_outputs is used for gptq as it needs to access the full collected data
+            collected_outputs = {}
+            for name, out in zip(inputs_to_calibre, ort_outs, strict=True):
+                collected_outputs[name] = out
+                # Collect calibration data for each array
+                calibrator.collect(name, out)
 
     # Compute quantization parameters for each node
     for node in ir_model.graph:
