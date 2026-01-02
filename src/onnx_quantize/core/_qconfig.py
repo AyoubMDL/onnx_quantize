@@ -8,6 +8,7 @@ from enum import Enum
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from onnx_quantize.core._calibration.base import CalibrationParams
 from onnx_quantize.core._dtypes import QuantType
 
 
@@ -63,6 +64,14 @@ class QConfig(BaseModel):
             quantization parameters. Defaults to `False`.
         calibration_data (`np.ndarray | None`, optional): Calibration data for
             static quantization. Defaults to `None`.
+        calibration_method (`CalibrationMethod | str`, optional): Calibration method
+            to use for computing quantization ranges. Defaults to `CalibrationMethod.MINMAX`.
+            Options: 'MinMax', 'Entropy', 'Percentile'.
+        calibration_params (`Dict[str, Any] | None`, optional): Additional parameters
+            for the calibration method. Defaults to `None`.
+            - For MinMax: 'momentum' (float): momentum for exponential moving average.
+            - batch_size (int, optional): Number of samples per batch. Defaults to 10.
+            - num_samples (int, optional): Total number of samples to use. Defaults to 100.
         activations_dtype (`QuantType | str`, optional):
             The quantization data type to use for the activations.
             Defaults to `QuantType.QUInt8`.
@@ -92,6 +101,7 @@ class QConfig(BaseModel):
     strategy: QuantizationStrategy | str | None = None
     mse: bool = False
     calibration_data: np.ndarray | None = None
+    calibration_params: CalibrationParams = Field(default_factory=CalibrationParams)
     activations_dtype: QuantType = QuantType.QUInt8
     activations_symmetric: bool = False
     weights_dtype: QuantType | str = QuantType.QInt8
@@ -129,6 +139,13 @@ class QConfig(BaseModel):
     def validate_strategy(cls, value) -> QuantizationStrategy | None:
         if isinstance(value, str):
             return QuantizationStrategy(value.lower())
+
+        return value
+
+    @field_validator("calibration_params", mode="before")
+    def validate_calibration_params(cls, value) -> CalibrationParams:
+        if isinstance(value, dict):
+            return CalibrationParams(**value)
 
         return value
 
