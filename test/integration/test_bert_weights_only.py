@@ -5,7 +5,7 @@ from optimum.onnxruntime import ORTModelForSequenceClassification
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from onnx_quantize import QConfig, QuantType, quantize
+from onnx_quantize import QConfig, QuantType, QWeightArgs, quantize
 
 
 def test_quantize_bert_weights_only(tmp_path):
@@ -19,7 +19,7 @@ def test_quantize_bert_weights_only(tmp_path):
     model = onnx.load(tmp_path / "model.onnx")
 
     qconfig = QConfig(
-        weights_only=True, weights_dtype=QuantType.QUInt8, weights_symmetric=True, strategy="tensor"
+        weights=QWeightArgs(dtype=QuantType.QUInt8, symmetric=True, strategy="tensor")
     )
     qmodel = quantize(model, qconfig)
     onnx.save(qmodel, tmp_path / "quantized_model.onnx")
@@ -46,4 +46,4 @@ def test_quantize_bert_weights_only(tmp_path):
         correct += (preds == batch["label"]).sum().item()
 
     # TODO: float has about 0.94
-    assert correct / len(dataset) == 0.86
+    assert correct / len(dataset) == 0.91
