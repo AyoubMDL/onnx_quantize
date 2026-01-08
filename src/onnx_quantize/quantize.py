@@ -7,8 +7,9 @@ import onnx_ir as ir
 import onnx_ir.passes.common as ir_passes
 import onnxscript
 
-from onnx_quantize import OP_TYPES_TO_QUANTIZE, GPTQConfig, QConfig
-from onnx_quantize.core._calibration.calibrate import calibrate_model, get_nodes_to_quantize
+from onnx_quantize import OP_TYPES_TO_QUANTIZE
+from onnx_quantize.core._calibration.calibrate import calibrate_model, get_target_nodes
+from onnx_quantize.core._qconfig import GPTQConfig, QConfig
 from onnx_quantize.opset import op
 from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import get_qfunctions
@@ -18,13 +19,34 @@ from onnx_quantize.qrules import qrules
 logger = logging.getLogger(__name__)
 
 
-def _add_qconfig_to_nodes(ir_model, qconfig):
-    nodes = get_nodes_to_quantize(ir_model, OP_TYPES_TO_QUANTIZE)
+def _add_qconfig_to_nodes(ir_model: ir.Model, qconfig: QConfig) -> None:
+    nodes = get_target_nodes(ir_model, OP_TYPES_TO_QUANTIZE)
 
     for node in ir_model.graph:
         if node in nodes:
             # Store the qconfig in the node metadata
             node.meta["qconfig"] = qconfig.model_dump()
+
+
+def _needs_calibration(qconfig: QConfig) -> bool:
+    if qconfig.input_activations and qconfig.input_activations.is_static:
+        return True
+
+    if qconfig.output_activations and qconfig.output_activations.is_static:
+        return True
+
+    if qconfig.weights and isinstance(qconfig.weights.algorithm, GPTQConfig):
+        return True
+
+    return False
+
+
+def _no_quantization_needed(qconfig: QConfig) -> bool:
+    return (
+        qconfig.weights is None
+        and qconfig.input_activations is None
+        and qconfig.output_activations is None
+    )
 
 
 def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelProto | ir.Model:
@@ -42,6 +64,10 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
             f"model must be an instance of onnx.ModelProto or onnx_ir.Model, got {type(model)}"
         )
 
+    if _no_quantization_needed(qconfig):
+        logger.info("No quantization parameters specified in qconfig. Returning original model.")
+        return model
+
     # Convert to IR model
     is_proto = isinstance(model, onnx.ModelProto)
     if is_proto:
@@ -55,11 +81,9 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
     model = onnxscript.rewriter.rewrite(model, pre_rules)
 
     # Calibrate the model to compute quantization parameters
-    if (qconfig.is_static and not qconfig.weights_only) or isinstance(
-        qconfig.algorithm, GPTQConfig
-    ):
+    if _needs_calibration(qconfig):
         logger.info("Calibrating the model...")
-        model = calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+        calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
 
     _add_qconfig_to_nodes(model, qconfig)
 
