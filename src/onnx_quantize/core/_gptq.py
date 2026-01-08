@@ -1,6 +1,7 @@
 __all__ = ["_gptq_quantize"]
 
 import copy
+import logging
 import math
 
 import numpy as np
@@ -12,6 +13,9 @@ from onnx_quantize.core._rtn import (
     _dequantize_array,
     _quantize_array_from_qparams,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _gptq(
@@ -62,14 +66,23 @@ def _gptq(
     Q_int = np.zeros_like(W)
 
     # compute inverse hessian
-    damp = percdamp * np.mean(np.diag(H))
-    diag = np.arange(shape[0])
+    try:
+        damp = percdamp * np.mean(np.diag(H))
+        diag = np.arange(shape[0])
 
-    H[diag, diag] += damp  # add a average value of
-    H = np.linalg.cholesky(H)
-    H = np.linalg.inv(H)
-    H = np.linalg.cholesky(H.T @ H).T
-    Hinv = H
+        H[diag, diag] += damp  # add damping to diagonal
+        H = np.linalg.cholesky(H)
+        H = np.linalg.inv(H)
+        H = np.linalg.cholesky(H.T @ H).T
+        Hinv = H
+    except np.linalg.LinAlgError:
+        logger.warning(
+            "Failed to invert hessian due to numerical instability. Consider "
+            "increasing percdamp, increasing the number "
+            "of calibration samples, or shuffling the calibration dataset. "
+            "Falling back to round-to-nearest for this module."
+        )
+        Hinv = H = np.eye(shape[0], dtype=H.dtype)
 
     # See section 3.4 of https://arxiv.org/abs/2203.07259
     for i1 in range(0, shape[0], block_size):
@@ -174,7 +187,8 @@ def _gptq_quantize(
 
     Args:
         weights (np.array): weight.
-        inputs (np.array): input activations.
+        inputs (np.array): input activations. Should have shape (num_samples, ..., in_features).
+            Recommend at least 128 samples for stable Hessian computation.
         quant_type (QuantType, optional): quantization type. Default is QuantType.QInt8.
         strategy (QuantizationStrategy, optional): quantization strategy. Default is CHANNEL.
         group_size (int, optional): how many elements share one scale/zp. Default is 32.
@@ -186,7 +200,6 @@ def _gptq_quantize(
         percdamp (float, optional): percent of the average Hessian diagonal to use for dampening.
         actorder (bool, optional): whether rearrange Hessian matrix considering the diag's value.
         mse (bool, optional): whether get scale and zero point with mse error.
-        per_channel (bool, optional): whether quantize weight per-channel.
 
     Returns:
         (np.ndarray, np.ndarray, np.ndarray): quantized weight, scale, zero point.
