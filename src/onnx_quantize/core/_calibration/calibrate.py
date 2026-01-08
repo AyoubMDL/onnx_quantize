@@ -1,72 +1,88 @@
+import collections
+import enum
 import logging
+import tempfile
 from contextlib import contextmanager
 
 import numpy as np
 import onnx_ir as ir
 import onnxruntime
 
-from onnx_quantize.core._calibration.factory import get_calibrator
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig
+from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
+from onnx_quantize.core._qconfig import (
+    GPTQConfig,
+    QActivationArgs,
+    QConfig,
+)
 from onnx_quantize.core._rtn import _compute_qparams
 
 
 logger = logging.getLogger(__name__)
 
 
-def get_nodes_to_quantize(ir_model: ir.Model, op_types_to_calibrate: list[str]) -> list[ir.Node]:
-    """Returns a list of nodes to quantize.
+class _ActivationKind(enum.Enum):
+    INPUT = "input"
+    OUTPUT = "output"
+
+
+def get_target_nodes(ir_model: ir.Model, op_types_to_calibrate: set[str]) -> set[ir.Node]:
+    """Returns a set of nodes to quantize.
 
     Args:
-        ir_model (ir.Model): The target model.
-        op_types_to_calibrate (set or list): Operation types to consider for calibration.
+        ir_model (ir.Model): The ONNX IR model to analyze.
+        op_types_to_calibrate (set[str]): Set of operation types to calibrate.
 
     Returns:
-        list: Nodes to quantize.
+        set[ir.Node]: A set of nodes to quantize.
     """
-    nodes = [node for node in ir_model.graph if node.op_type in op_types_to_calibrate]
 
-    # Filter nodes which second or third input (if it exists) is not a constant
-    for node in nodes:
+    def is_valid(node: ir.Node) -> bool:
+        if node.op_type not in op_types_to_calibrate:
+            return False
+
+        # Weight must be constant
         if ir.convenience.get_const_tensor(node.inputs[1]) is None:
-            nodes.remove(node)
+            return False
 
-        # Bias for Gemm
+        # Optional bias must be constant
         if len(node.inputs) > 2 and ir.convenience.get_const_tensor(node.inputs[2]) is None:
-            nodes.remove(node)
+            return False
 
-    return nodes
+        return True
+
+    return {node for node in ir_model.graph if is_valid(node)}
+
+
+def _get_values_to_calibrate(
+    target_nodes: set[ir.Node], *, augment_inputs: bool, augment_outputs: bool
+) -> set[ir.Value]:
+    """Collect values (inputs/outputs) to calibrate from target nodes."""
+    values = set()
+
+    for node in target_nodes:
+        if augment_inputs:
+            values.add(node.inputs[0])
+
+        if augment_outputs:
+            values.add(node.outputs[0])
+
+    return values
 
 
 @contextmanager
-def _augment_model(ir_model: ir.Model, nodes_to_calibrate: list[ir.Node]):
-    """Context manager that temporarily augments model outputs with node inputs.
+def _augment_model(ir_model: ir.Model, values: set[ir.Value]):
+    """Temporarily augment model outputs to include specified values."""
+    original_outputs = list(ir_model.graph.outputs)
 
-    Args:
-        ir_model (ir.Model): The target model.
-        nodes_to_calibrate (list[ir.Node]): Nodes whose inputs should be added to outputs.
-
-    Yields:
-        list: Names of inputs that were added to the outputs.
-    """
-    # Collect unique input names to calibrate
-    inputs_to_calibre = []
-    added_outputs = []
-
-    for node in nodes_to_calibrate:
-        # TODO: update this when supporting output quantization
-        if node.inputs[0].name not in inputs_to_calibre:
-            inputs_to_calibre.append(node.inputs[0].name)
-            added_outputs.append(node.inputs[0])
-            ir_model.graph.outputs.extend([node.inputs[0]])
+    for v in values:
+        if v not in ir_model.graph.outputs:
+            ir_model.graph.outputs.append(v)
 
     try:
-        yield inputs_to_calibre
+        yield [v.name for v in ir_model.graph.outputs]
 
     finally:
-        # Remove the added outputs
-        for output in added_outputs:
-            if output in ir_model.graph.outputs:
-                ir_model.graph.outputs.remove(output)
+        ir_model.graph.outputs[:] = original_outputs
 
 
 def _prepare_calibration_data(
@@ -102,77 +118,166 @@ def _prepare_calibration_data(
     return calibration_data
 
 
-def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: list) -> ir.Model:
+def _collect_activations(
+    ir_model: ir.Model,
+    values_to_calibrate: set[ir.Value],
+    calibration_data: np.ndarray,
+    num_samples: int,
+    batch_size: int,
+) -> list[dict[str, np.ndarray]]:
+    """Collect interm activation values from the model during inference."""
+    # Augment model graph outputs to collect required activations
+    with (
+        _augment_model(ir_model, values_to_calibrate) as values_names,
+        tempfile.NamedTemporaryFile() as tmpfile,
+    ):
+        ir.save(ir_model, tmpfile.name)
+        # TODO: specify providers
+        session = onnxruntime.InferenceSession(tmpfile.name)
+
+        # Prepare calibration data (batching, random samples if needed)
+        calibration_data = _prepare_calibration_data(
+            calibration_data, batch_size, num_samples, session.get_inputs()[0].shape
+        )
+
+        input_name = session.get_inputs()[0].name
+        activations = []
+
+        for batch in calibration_data:
+            outputs = session.run(values_names, {input_name: batch})
+            activations.append(dict(zip(values_names, outputs, strict=True)))
+
+    return activations
+
+
+def _set_qparams(
+    ir_model: ir.Model,
+    activations: list[dict[str, np.ndarray]],
+    nodes_to_calibrate: set[ir.Node],
+    calibrator: Calibrator,
+    qargs: QActivationArgs,
+    kind: _ActivationKind,
+) -> None:
+    """Compute and set quantization parameters (scale and zero-point) for activations."""
+    # Run Calibrator to later compute ranges
+    for activation in activations:
+        for name, data in activation.items():
+            calibrator.collect(name, data)
+
+    for node in ir_model.graph:
+        name = node.inputs[0].name if kind == _ActivationKind.INPUT else node.outputs[0].name
+
+        if node in nodes_to_calibrate and name in calibrator.data:
+            # Use calibrator to compute the quantization range
+            rmin, rmax = calibrator.compute_range(name)
+
+            node.meta[f"{kind.value}_scale"], node.meta[f"{kind.value}_zero_point"] = (
+                _compute_qparams(
+                    rmin,
+                    rmax,
+                    qargs.dtype,
+                    qargs.symmetric,
+                    qargs.reduce_range,
+                )
+            )
+
+
+def _set_qparams_gptq(
+    ir_model: ir.Model,
+    activations: list[dict[str, np.ndarray]],
+    nodes_to_calibrate: set[ir.Node],
+) -> None:
+    """Collect and store input activations for GPTQ quantization."""
+    # As for GPTQ, we just need to collect input activations for each node,
+    # therefore, we transform the list of outputs into a dict and concatenate along axis 0
+    collected_outputs = collections.defaultdict(list)
+    for activation in activations:
+        for name, data in activation.items():
+            collected_outputs[name].append(data)
+
+    for name in collected_outputs:
+        collected_outputs[name] = np.concatenate(collected_outputs[name], axis=0)
+
+    for node in ir_model.graph:
+        if node in nodes_to_calibrate and node.inputs[0].name in collected_outputs:
+            # Collect input activations to compute Hessian
+            node.meta["input"] = collected_outputs[node.inputs[0].name]
+
+
+def calibrate_model(
+    ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: set[str]
+) -> ir.Model:
     """Calibrates the model by computing scales and zero-points for specified nodes.
 
     Args:
         ir_model (ir.Model): The ONNX IR model to be calibrated.
         qconfig (QConfig): Configuration for quantization parameters.
-        op_types_to_calibrate (list): List of operation types to calibrate.
+        op_types_to_calibrate (set[str]): Set of operation types to calibrate.
 
     Returns:
         ir.Model: The calibrated ONNX IR model with scales and zero-points added as metadata
-
-    Note:
-        Supports mini-batch processing via calibration_params:
-        - 'batch_size': Number of samples per batch (default: process all at once)
-        - 'num_samples': Total number of samples to use (default: all available)
     """
-    # Clone model to not change original
-    nodes_to_calibrate = get_nodes_to_quantize(ir_model, op_types_to_calibrate)
+    # Get target nodes to calibrate
+    nodes_to_calibrate = get_target_nodes(ir_model, op_types_to_calibrate)
 
-    # Augment graph with context manager
-    with _augment_model(ir_model, nodes_to_calibrate) as inputs_to_calibre:
-        proto = ir.to_proto(ir_model)
-        session = onnxruntime.InferenceSession(proto.SerializeToString())
+    # Identify which activations to calibrate
+    calibrate_inputs = qconfig.input_activations is not None and qconfig.input_activations.is_static
+    calibrate_outputs = (
+        qconfig.output_activations is not None and qconfig.output_activations.is_static
+    )
+    gptq = qconfig.weights is not None and isinstance(qconfig.weights.algorithm, GPTQConfig)
 
-        # Extract calibration parameters
-        calibrator_params = qconfig.calibration_params.model_dump()
-        method = calibrator_params.pop("method")
-        batch_size = calibrator_params.pop("batch_size")
-        num_samples = calibrator_params.pop("num_samples")
+    values_to_calibrate = _get_values_to_calibrate(
+        get_target_nodes(ir_model, op_types_to_calibrate),
+        augment_inputs=calibrate_inputs or gptq,
+        augment_outputs=calibrate_outputs,
+    )
 
-        # Get Calibration Data or generate random data
-        calibration_data = _prepare_calibration_data(
-            qconfig.calibration_data, batch_size, num_samples, session.get_inputs()[0].shape
+    # Extract calibration parameters
+    calibrator_params = qconfig.calibration_params.model_dump()
+    batch_size = calibrator_params.pop("batch_size")
+    num_samples = calibrator_params.pop("num_samples")
+
+    activations = _collect_activations(
+        ir_model,
+        values_to_calibrate=values_to_calibrate,
+        calibration_data=qconfig.calibration_data,
+        num_samples=num_samples,
+        batch_size=batch_size,
+    )
+
+    # Remove calibration data from qconfig to avoid storing large data in node meta
+    qconfig.calibration_data = None
+
+    # Create calibrator based on configuration
+    method = calibrator_params.pop("method")
+    calibrator = get_calibrator(method, **calibrator_params)
+
+    if calibrate_inputs:
+        _set_qparams(
+            ir_model,
+            activations,
+            nodes_to_calibrate,
+            calibrator,
+            qconfig.input_activations,
+            _ActivationKind.INPUT,
         )
 
-        # Create calibrator based on configuration
-        calibrator = get_calibrator(method, **calibrator_params)
+    if calibrate_outputs:
+        _set_qparams(
+            ir_model,
+            activations,
+            nodes_to_calibrate,
+            calibrator,
+            qconfig.output_activations,
+            _ActivationKind.OUTPUT,
+        )
 
-        # Run inference and collect outputs
-        for batch in calibration_data:
-            inputs_dict = {session.get_inputs()[0].name: batch}
-            ort_outs = session.run(inputs_to_calibre, inputs_dict)
-
-            # Construct a dict containing output name and output arrays
-            # collected_outputs is used for gptq as it needs to access the full collected data
-            collected_outputs = {}
-            for name, out in zip(inputs_to_calibre, ort_outs, strict=True):
-                collected_outputs[name] = out
-                # Collect calibration data for each array
-                calibrator.collect(name, out)
-
-    # Compute quantization parameters for each node
-    for node in ir_model.graph:
-        if node.op_type in op_types_to_calibrate and node.inputs[0].name in calibrator.data:
-            array_name = node.inputs[0].name
-
-            if isinstance(qconfig.algorithm, GPTQConfig):
-                # Collect input activations to compute Hessian
-                node.meta["input"] = collected_outputs[array_name]
-                # TODO: maybe clear the current outputs to save memory
-                continue  # GPTQ is weight only quantization
-
-            # Use calibrator to compute the quantization range
-            rmin, rmax = calibrator.compute_range(array_name)
-
-            node.meta["input_scale"], node.meta["input_zero_point"] = _compute_qparams(
-                rmin,
-                rmax,
-                qconfig.activations_dtype,
-                qconfig.activations_symmetric,
-                qconfig.reduce_range,
-            )
-
-    return ir_model
+    if gptq:
+        # This is special case where we need to collect input activations for GPTQ
+        # No need for calibrator here.
+        _set_qparams_gptq(
+            ir_model,
+            activations,
+            nodes_to_calibrate,
+        )
