@@ -20,7 +20,7 @@ pip install onnx-quantize
 
 Here's a minimal example to quantize an ONNX model:
 ```python
-from onnx_quantize import QConfig, QuantType, quantize 
+from onnx_quantize import QConfig, QuantType, QWeightArgs, QActivationArgs, quantize 
 import onnx
 
 # Load your model
@@ -28,13 +28,16 @@ model = onnx.load("your_model.onnx")
 
 # Define quantization configuration
 qconfig = QConfig(
-    is_static=False,
-    weights_only=False,
-    activations_dtype=QuantType.QInt8,
-    activations_symmetric=False,
-    weights_dtype=QuantType.QInt8,
-    weights_symmetric=True,
-    strategy="tensor",  # or "channel" or "group"
+    weights=QWeightArgs(
+        dtype=QuantType.QInt8,
+        symmetric=True,
+        strategy="tensor",  # or "channel"
+    ),
+    input_activations=QActivationArgs(
+        dtype=QuantType.QInt8,
+        symmetric=False,
+        is_static=False,  # Dynamic quantization
+    ),
 )
 
 # Quantize the model
@@ -50,6 +53,7 @@ onnx.save(qmodel, "qmodel.onnx")
 - **Static Quantization**: Calibration-based quantization with activation statistics
 - **Dynamic Quantization**: Runtime quantization for activations
 - **Weights-Only Quantization**: Quantize only model weights, keeping activations in FP32
+- **Fine-grained Control**: Separate configuration for weights, input activations, and output activations
 
 ### Data Types
 Supports multiple quantization data types:
@@ -81,16 +85,17 @@ Currently supports quantization for:
 
 ### Weights-Only Quantization (4-bit)
 ```python
-from onnx_quantize import QConfig, QuantType, quantize
+from onnx_quantize import QConfig, QuantType, QWeightArgs, quantize
 import onnx
 
 model = onnx.load("model.onnx")
 
 qconfig = QConfig(
-    weights_only=True,
-    weights_dtype=QuantType.QUInt4,
-    weights_symmetric=True,
-    strategy="tensor"
+    weights=QWeightArgs(
+        dtype=QuantType.QUInt4,
+        symmetric=True,
+        strategy="tensor"
+    )
 )
 
 qmodel = quantize(model, qconfig)
@@ -99,21 +104,85 @@ onnx.save(qmodel, "model_w4.onnx")
 
 ### Group Quantization
 ```python
-from onnx_quantize import QConfig, QuantType, quantize
+from onnx_quantize import QConfig, QuantType, QWeightArgs, quantize
 import onnx
 
 model = onnx.load("model.onnx")
 
 qconfig = QConfig(
-    weights_only=True,
-    weights_dtype=QuantType.QInt8,
-    weights_symmetric=True,
-    group_size=128,
-    strategy="group"
+    weights=QWeightArgs(
+        dtype=QuantType.QInt8,
+        symmetric=True,
+        group_size=128,
+        strategy="group"
+    )
 )
 
 qmodel = quantize(model, qconfig)
 onnx.save(qmodel, "model_group.onnx")
+```
+
+### Static Quantization with Calibration
+```python
+from onnx_quantize import QConfig, QuantType, QWeightArgs, QActivationArgs, quantize
+import onnx
+import numpy as np
+
+model = onnx.load("model.onnx")
+
+# Prepare calibration data
+calibration_data = np.random.randn(100, 224, 224, 3).astype(np.float32)
+
+qconfig = QConfig(
+    weights=QWeightArgs(
+        dtype=QuantType.QInt8,
+        symmetric=True,
+        strategy="tensor"
+    ),
+    input_activations=QActivationArgs(
+        dtype=QuantType.QUInt8,
+        symmetric=False,
+        is_static=True  # Static quantization
+    ),
+    calibration_data=calibration_data
+)
+
+qmodel = quantize(model, qconfig)
+onnx.save(qmodel, "model_static.onnx")
+```
+
+### Output Activation Quantization
+```python
+from onnx_quantize import QConfig, QuantType, QWeightArgs, QActivationArgs, quantize
+import onnx
+import numpy as np
+
+model = onnx.load("model.onnx")
+
+# Prepare calibration data for static quantization
+calibration_data = np.random.randn(100, 224, 224, 3).astype(np.float32)
+
+qconfig = QConfig(
+    weights=QWeightArgs(
+        dtype=QuantType.QInt8,
+        symmetric=True,
+        strategy="tensor"
+    ),
+    input_activations=QActivationArgs(
+        dtype=QuantType.QUInt8,
+        symmetric=False,
+        is_static=True
+    ),
+    output_activations=QActivationArgs(
+        dtype=QuantType.QUInt8,
+        symmetric=False,
+        is_static=True
+    ),
+    calibration_data=calibration_data
+)
+
+qmodel = quantize(model, qconfig)
+onnx.save(qmodel, "model_full_quant.onnx")
 ```
 
 ## 🎯 Goals

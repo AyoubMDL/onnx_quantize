@@ -20,12 +20,20 @@ class QRewriter(onnxscript.rewriter.RewriteRuleClassBase):
         # (when bias is present or not)
         out = args[-1]  # out is always the last argument
         node = out.producer()
+
         qconfig = QConfig(**node.meta["qconfig"])
 
-        if qconfig.weights_only:
+        weights_only = qconfig.input_activations is None and qconfig.output_activations is None
+        static_input = qconfig.input_activations is not None and qconfig.input_activations.is_static
+        static_output = (
+            qconfig.output_activations is not None and qconfig.output_activations.is_static
+        )
+        is_static = static_input or static_output
+
+        if weights_only:
             return self._rewrite_weights_only(op, *args, qconfig=qconfig)
 
-        elif qconfig.is_static:
+        elif is_static:
             return self._rewrite_static(op, *args, qconfig=qconfig)
 
-        return self._rewrite_dynamic(op, *args[:-1], qconfig=qconfig)
+        return self._rewrite_dynamic(op, *args, qconfig=qconfig)

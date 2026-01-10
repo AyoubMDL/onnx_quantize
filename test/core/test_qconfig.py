@@ -1,569 +1,307 @@
 import numpy as np
 import pytest
 
-from onnx_quantize import GPTQConfig, QConfig, QuantizationStrategy, QuantType
-
-
-def test_quantization_strategy_enum_values():
-    """Test that QuantizationStrategy enum has expected values."""
-    assert QuantizationStrategy.TENSOR == "tensor"
-    assert QuantizationStrategy.CHANNEL == "channel"
-    assert QuantizationStrategy.GROUP == "group"
-
-
-def test_quantization_strategy_from_string():
-    """Test creating QuantizationStrategy from string."""
-    assert QuantizationStrategy("tensor") == QuantizationStrategy.TENSOR
-    assert QuantizationStrategy("channel") == QuantizationStrategy.CHANNEL
-    assert QuantizationStrategy("group") == QuantizationStrategy.GROUP
-
-
-def test_gptq_config_defaults():
-    """Test GPTQConfig with default values."""
-    config = GPTQConfig()
-    assert config.block_size == 128
-    assert config.percdamp == 0.01
-    assert config.group_size == -1
-    assert config.actorder is False
-
-
-def test_gptq_config_custom_values():
-    """Test GPTQConfig with custom values."""
-    config = GPTQConfig(
-        block_size=256,
-        percdamp=0.05,
-        group_size=128,
-        actorder=True,
-    )
-    assert config.block_size == 256
-    assert config.percdamp == 0.05
-    assert config.group_size == 128
-    assert config.actorder is True
-
-
-def test_gptq_config_partial_override():
-    """Test GPTQConfig with partial parameter override."""
-    config = GPTQConfig(block_size=64, actorder=True)
-    assert config.block_size == 64
-    assert config.percdamp == 0.01
-    assert config.group_size == -1
-    assert config.actorder is True
-
-
-def test_qconfig_defaults():
-    """Test QConfig with all default values."""
-    config = QConfig()
-    assert config.is_static is True
-    assert config.weights_only is False
-    assert config.clip_ratio == 1.0
-    assert config.reduce_range is False
-    assert config.group_size is None
-    assert config.strategy == QuantizationStrategy.TENSOR
-    assert config.mse is False
-    assert config.calibration_data is None
-    assert config.activations_dtype == QuantType.QUInt8
-    assert config.activations_symmetric is False
-    assert config.weights_dtype == QuantType.QInt8
-    assert config.weights_symmetric is True
-    assert config.algorithm is None
-
-
-def test_qconfig_custom_basic_values():
-    """Test QConfig with custom basic values."""
-    config = QConfig(
-        is_static=False,
-        weights_only=True,
-        clip_ratio=0.95,
-        reduce_range=True,
-        mse=True,
-        activations_symmetric=True,
-        weights_symmetric=False,
-    )
-    assert config.is_static is False
-    assert config.weights_only is True
-    assert config.clip_ratio == 0.95
-    assert config.reduce_range is True
-    assert config.mse is True
-    assert config.activations_symmetric is True
-    assert config.weights_symmetric is False
-
-
-def test_qconfig_with_calibration_data():
-    """Test QConfig with calibration data."""
-    calib_data = np.random.randn(10, 5).astype(np.float32)
-    config = QConfig(calibration_data=calib_data)
-    assert config.calibration_data is not None
-    assert np.array_equal(config.calibration_data, calib_data)
-
-
-def test_qconfig_weights_dtype_from_quant_type():
-    """Test setting weights_dtype using QuantType enum."""
-    for dtype in [
-        QuantType.QInt4,
-        QuantType.QInt8,
-        QuantType.QInt32,
-        QuantType.QUInt4,
-        QuantType.QUInt8,
-        QuantType.QUInt32,
-    ]:
-        config = QConfig(weights_dtype=dtype, weights_only=True)
-        assert config.weights_dtype == dtype
-
-
-def test_qconfig_weights_dtype_from_string():
-    """Test setting weights_dtype using string."""
-    config = QConfig(weights_dtype="int4", weights_only=True)
-    assert config.weights_dtype == QuantType.QInt4
-
-    config = QConfig(weights_dtype="uint8")
-    assert config.weights_dtype == QuantType.QUInt8
-
-    config = QConfig(weights_dtype="int32")
-    assert config.weights_dtype == QuantType.QInt32
-
-
-def test_qconfig_activations_dtype_from_quant_type():
-    """Test setting activations_dtype using QuantType enum."""
-    for dtype in [
-        QuantType.QInt8,
-        QuantType.QInt32,
-        QuantType.QUInt8,
-        QuantType.QUInt32,
-    ]:
-        config = QConfig(activations_dtype=dtype)
-        assert config.activations_dtype == dtype
-
-
-def test_qconfig_activations_dtype_from_string():
-    """Test setting activations_dtype using string."""
-    config = QConfig(activations_dtype="int8")
-    assert config.activations_dtype == QuantType.QInt8
-
-    config = QConfig(activations_dtype="uint32")
-    assert config.activations_dtype == QuantType.QUInt32
-
-
-@pytest.mark.parametrize("insupported_dtype", ["int4", "uint4"])
-def test_qconfig_activations_dtype_unsupported(insupported_dtype):
-    with pytest.raises(ValueError, match="4-bit quantization is not supported for activations"):
-        QConfig(activations_dtype=insupported_dtype)
-
-
-@pytest.mark.parametrize("insupported_dtype", ["int4", "uint4"])
-def test_qconfig_weights_dtype_unsupported(insupported_dtype):
-    with pytest.raises(ValueError, match="4-bit quantization is only supported for weights_only"):
-        QConfig(weights_dtype=insupported_dtype, weights_only=False)
-
-
-def test_qconfig_strategy_tensor_inferred_from_none_group_size():
-    """Test that strategy is inferred as TENSOR when group_size is None."""
-    config = QConfig(group_size=None)
-    assert config.strategy == QuantizationStrategy.TENSOR
-    assert config.group_size is None
-
-
-def test_qconfig_strategy_channel_inferred_from_negative_one_group_size():
-    """Test that strategy is inferred as CHANNEL when group_size is -1."""
-    config = QConfig(group_size=-1)
-    assert config.strategy == QuantizationStrategy.CHANNEL
-    assert config.group_size == -1
-
-
-def test_qconfig_strategy_group_inferred_from_positive_group_size():
-    """Test that strategy is inferred as GROUP when group_size is positive."""
-    config = QConfig(group_size=128, weights_only=True)
-    assert config.strategy == QuantizationStrategy.GROUP
-    assert config.group_size == 128
-
-
-def test_qconfig_strategy_explicit_tensor():
-    """Test explicitly setting strategy to TENSOR."""
-    config = QConfig(strategy=QuantizationStrategy.TENSOR)
-    assert config.strategy == QuantizationStrategy.TENSOR
-
-
-def test_qconfig_strategy_explicit_channel():
-    """Test explicitly setting strategy to CHANNEL."""
-    config = QConfig(strategy=QuantizationStrategy.CHANNEL)
-    assert config.strategy == QuantizationStrategy.CHANNEL
-
-
-def test_qconfig_strategy_explicit_group():
-    """Test explicitly setting strategy to GROUP."""
-    config = QConfig(strategy=QuantizationStrategy.GROUP, group_size=64, weights_only=True)
-    assert config.strategy == QuantizationStrategy.GROUP
-
-
-def test_qconfig_strategy_from_string():
-    """Test setting strategy from string."""
-    config = QConfig(strategy="tensor")
-    assert config.strategy == QuantizationStrategy.TENSOR
-
-    config = QConfig(strategy="channel")
-    assert config.strategy == QuantizationStrategy.CHANNEL
-
-    config = QConfig(strategy="group", group_size=32, weights_only=True)
-    assert config.strategy == QuantizationStrategy.GROUP
-
-
-def test_qconfig_strategy_from_string_case_insensitive():
-    """Test setting strategy from string is case insensitive."""
-    config = QConfig(strategy="TENSOR")
-    assert config.strategy == QuantizationStrategy.TENSOR
-
-    config = QConfig(strategy="Channel")
-    assert config.strategy == QuantizationStrategy.CHANNEL
-
-    config = QConfig(strategy="GROUP", group_size=16, weights_only=True)
-    assert config.strategy == QuantizationStrategy.GROUP
-
-
-def test_qconfig_group_size_various_positive_values():
-    """Test various positive group_size values."""
-    for group_size in [1, 16, 32, 64, 128, 256, 512]:
-        config = QConfig(group_size=group_size, weights_only=True)
-        assert config.group_size == group_size
-        assert config.strategy == QuantizationStrategy.GROUP
-
-
-def test_qconfig_group_size_invalid_negative():
-    """Test that group_size < -1 raises ValueError."""
-    with pytest.raises(ValueError, match="Invalid group size"):
-        QConfig(group_size=-2)
-
-    with pytest.raises(ValueError, match="Invalid group size"):
-        QConfig(group_size=-100)
-
-
-def test_qconfig_clip_ratio_valid_values():
-    """Test valid clip_ratio values."""
-    for ratio in [0.001, 0.1, 0.5, 0.9, 0.99, 1.0]:
-        config = QConfig(clip_ratio=ratio)
-        assert config.clip_ratio == ratio
-
-
-def test_qconfig_clip_ratio_invalid_zero():
-    """Test that clip_ratio = 0.0 raises ValueError."""
-    with pytest.raises(ValueError, match="clip_ratio must be in"):
-        QConfig(clip_ratio=0.0)
-
-    with pytest.raises(ValueError, match="clip_ratio must be in"):
-        QConfig(clip_ratio=-0.1)
-
-    with pytest.raises(ValueError, match="clip_ratio must be in"):
-        QConfig(clip_ratio=1.1)
-
-    with pytest.raises(ValueError, match="clip_ratio must be in"):
-        QConfig(clip_ratio=2.0)
-
-
-def test_qconfig_with_gptq_algorithm():
-    """Test QConfig with GPTQ algorithm."""
-    gptq_config = GPTQConfig(block_size=256, percdamp=0.02)
-    config = QConfig(algorithm=gptq_config)
-    assert config.algorithm is not None
-    assert config.algorithm.block_size == 256
-    assert config.algorithm.percdamp == 0.02
-
-
-def test_qconfig_gptq_with_tensor_strategy():
-    """Test that GPTQ is allowed with TENSOR strategy."""
-    gptq_config = GPTQConfig()
-    config = QConfig(algorithm=gptq_config, strategy=QuantizationStrategy.TENSOR)
-    assert config.strategy == QuantizationStrategy.TENSOR
-    assert config.algorithm is not None
-
-
-def test_qconfig_gptq_with_channel_strategy():
-    """Test that GPTQ is allowed with CHANNEL strategy."""
-    gptq_config = GPTQConfig()
-    config = QConfig(algorithm=gptq_config, strategy=QuantizationStrategy.CHANNEL)
-    assert config.strategy == QuantizationStrategy.CHANNEL
-    assert config.algorithm is not None
-
-
-def test_qconfig_gptq_with_group_strategy_raises_error():
-    """Test that GPTQ with GROUP strategy raises ValueError."""
-    gptq_config = GPTQConfig()
-    with pytest.raises(ValueError, match="GPTQ algorithm only supports"):
-        QConfig(
-            algorithm=gptq_config,
-            strategy=QuantizationStrategy.GROUP,
-            group_size=128,
-            weights_only=True,
+from onnx_quantize import (
+    CalibrationMethod,
+    GPTQConfig,
+    QActivationArgs,
+    QConfig,
+    QuantizationStrategy,
+    QuantType,
+    QWeightArgs,
+)
+
+
+class TestQConfig:
+    def test_qconfig_defaults(self):
+        config = QConfig(weights=QWeightArgs())
+        assert config.format == "qdq"
+        assert config.weights.dtype == QuantType.QInt8
+        assert config.weights.strategy == QuantizationStrategy.TENSOR
+        assert config.weights.symmetric is False
+        assert config.input_activations is None
+        assert config.output_activations is None
+
+    def test_qconfig_valid_weights_only(self):
+        # 4-bit weights only is allowed
+        config = QConfig(weights=QWeightArgs(dtype=QuantType.QInt4))
+        assert config.weights.dtype == QuantType.QInt4
+
+        # Group quantization weights only is allowed
+        config = QConfig(weights=QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=32))
+        assert config.weights.strategy == QuantizationStrategy.GROUP
+        assert config.weights.group_size == 32
+
+    def test_qconfig_valid_static_quant(self):
+        config = QConfig(
+            weights=QWeightArgs(),
+            input_activations=QActivationArgs(is_static=True),
+            output_activations=QActivationArgs(is_static=True),
         )
+        assert config.input_activations.is_static
+        assert config.output_activations.is_static
 
-
-def test_qconfig_gptq_inferred_group_strategy_raises_error():
-    """Test that GPTQ with inferred GROUP strategy raises ValueError."""
-    gptq_config = GPTQConfig()
-    with pytest.raises(ValueError, match="GPTQ algorithm only supports"):
-        QConfig(algorithm=gptq_config, group_size=128, weights_only=True)
-
-
-def test_qconfig_group_quantization_requires_weights_only():
-    """Test that GROUP strategy requires weights_only=True."""
-    with pytest.raises(ValueError, match="Group quantization is only supported for weights_only"):
-        QConfig(strategy=QuantizationStrategy.GROUP, group_size=128, weights_only=False)
-
-
-def test_qconfig_group_quantization_inferred_requires_weights_only():
-    """Test that inferred GROUP strategy requires weights_only=True."""
-    with pytest.raises(ValueError, match="Group quantization is only supported for weights_only"):
-        QConfig(group_size=128, weights_only=False)
-
-
-def test_qconfig_group_strategy_requires_positive_group_size():
-    """Test that GROUP strategy requires positive group_size."""
-    with pytest.raises(ValueError, match="requires group_size to be set to a positive value"):
-        QConfig(
-            strategy=QuantizationStrategy.GROUP,
-            group_size=None,
-            weights_only=True,
+    def test_qconfig_valid_dynamic_quant(self):
+        # Default is dynamic (is_static=False)
+        config = QConfig(
+            weights=QWeightArgs(),
+            input_activations=QActivationArgs(dtype=QuantType.QUInt8),
+            output_activations=QActivationArgs(dtype=QuantType.QUInt8),
         )
+        assert config.input_activations.is_static
+        assert config.output_activations.is_static
 
-    with pytest.raises(ValueError, match="requires group_size to be set to a positive value"):
-        QConfig(
-            strategy=QuantizationStrategy.GROUP,
-            group_size=-1,
-            weights_only=True,
+    def test_qconfig_invalid_format(self):
+        with pytest.raises(ValueError, match="Invalid quantization format"):
+            QConfig(weights=QWeightArgs(), format="invalid_format")
+
+    def test_qconfig_calibration_params_default(self):
+        config = QConfig(weights=QWeightArgs())
+        assert config.calibration_params.momentum == 0.0
+        assert config.calibration_params.num_samples == 100
+        assert config.calibration_params.method.value == "minmax"
+
+    def test_qconfig_calibration_params(self):
+        config = QConfig(
+            weights=QWeightArgs(),
+            calibration_params={"momentum": 0.9, "num_samples": 50, "batch_size": 5},
         )
+        assert config.calibration_params.method == CalibrationMethod.MINMAX
+        assert config.calibration_params.momentum == 0.9
+        assert config.calibration_params.num_samples == 50
+        assert config.calibration_params.batch_size == 5
+
+    def test_qconfig_calibration_data(self):
+        calib_data = np.random.randn(10, 3, 224, 224).astype(np.float32)
+        config = QConfig(weights=QWeightArgs(), calibration_data=calib_data)
+        assert config.calibration_data.shape == (10, 3, 224, 224)
+
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt4, QuantType.QUInt4])
+    def test_qconfig_4bit_with_input_activations_not_supported(self, quant_type):
+        with pytest.raises(NotImplementedError, match="4-bit quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(dtype=quant_type),
+                input_activations=QActivationArgs(),
+            )
+
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt4, QuantType.QUInt4])
+    def test_qconfig_4bit_with_output_activations_not_supported(self, quant_type):
+        with pytest.raises(NotImplementedError, match="4-bit quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(dtype=quant_type),
+                output_activations=QActivationArgs(),
+            )
+
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt4, QuantType.QUInt4])
+    def test_qconfig_4bit_with_both_activations_not_supported(self, quant_type):
+        with pytest.raises(NotImplementedError, match="4-bit quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(dtype=quant_type),
+                input_activations=QActivationArgs(),
+                output_activations=QActivationArgs(),
+            )
+
+    def test_qconfig_group_quant_with_input_activations_not_supported(self):
+        with pytest.raises(NotImplementedError, match="Group quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=128),
+                input_activations=QActivationArgs(),
+            )
+
+    def test_qconfig_group_quant_with_output_activations_not_supported(self):
+        with pytest.raises(NotImplementedError, match="Group quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=128),
+                output_activations=QActivationArgs(),
+            )
+
+    def test_qconfig_group_quant_with_both_activations_not_supported(self):
+        with pytest.raises(NotImplementedError, match="Group quantization is only supported"):
+            QConfig(
+                weights=QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=128),
+                input_activations=QActivationArgs(),
+                output_activations=QActivationArgs(),
+            )
+
+    @pytest.mark.parametrize("is_static", [True, False])
+    def test_qconfig_mixed_static_dynamic_activations_not_supported(self, is_static):
+        with pytest.raises(
+            NotImplementedError, match="Both input and output activations must be either both"
+        ):
+            QConfig(
+                weights=QWeightArgs(),
+                input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=is_static),
+                output_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=not is_static),
+            )
+
+    def test_qconfig_qlinear_format_not_supported(self):
+        """Test that QLinear format raises NotImplementedError."""
+        with pytest.raises(NotImplementedError, match="Only QDQ format is currently supported"):
+            QConfig(
+                weights=QWeightArgs(),
+                format="qlinear",
+            )
+
+    def test_qconfig_no_quantization_needed(self):
+        config = QConfig()
+        assert config.weights is None
+        assert config.input_activations is None
+        assert config.output_activations is None
+
+    def test_qconfig_unsupported_activation_only_quantization(self):
+        with pytest.raises(ValueError, match="Activation only quantization is not supported"):
+            QConfig(
+                input_activations=QActivationArgs(),
+            )
+
+        with pytest.raises(ValueError, match="Activation only quantization is not supported"):
+            QConfig(
+                output_activations=QActivationArgs(),
+            )
+
+        with pytest.raises(ValueError, match="Activation only quantization is not supported"):
+            QConfig(
+                input_activations=QActivationArgs(),
+                output_activations=QActivationArgs(),
+            )
 
 
-def test_qconfig_positive_group_size_requires_group_strategy():
-    """Test that positive group_size requires GROUP strategy."""
-    with pytest.raises(ValueError, match="group_size requires strategy to be set to 'group'"):
-        QConfig(group_size=128, strategy=QuantizationStrategy.TENSOR, weights_only=True)
+class TestQWeightArgs:
+    def test_qweight_args_invalid_clip_ratio(self):
+        with pytest.raises(ValueError, match="clip_ratio must be in"):
+            QWeightArgs(clip_ratio=0.0)
 
-    with pytest.raises(ValueError, match="group_size requires strategy to be set to 'group'"):
-        QConfig(group_size=128, strategy=QuantizationStrategy.CHANNEL, weights_only=True)
+        with pytest.raises(ValueError, match="clip_ratio must be in"):
+            QWeightArgs(clip_ratio=-0.5)
 
+        with pytest.raises(ValueError, match="clip_ratio must be in"):
+            QWeightArgs(clip_ratio=1.5)
 
-def test_qconfig_weights_only_with_various_strategies():
-    """Test weights_only quantization with different strategies."""
-    # Tensor strategy
-    config = QConfig(weights_only=True, strategy=QuantizationStrategy.TENSOR)
-    assert config.weights_only is True
-    assert config.strategy == QuantizationStrategy.TENSOR
+    def test_qweight_args_invalid_group_size(self):
+        with pytest.raises(ValueError, match="Invalid group size"):
+            QWeightArgs(group_size=-2)
 
-    # Channel strategy
-    config = QConfig(weights_only=True, strategy=QuantizationStrategy.CHANNEL)
-    assert config.weights_only is True
-    assert config.strategy == QuantizationStrategy.CHANNEL
+        with pytest.raises(ValueError, match="Invalid group size"):
+            QWeightArgs(group_size=-10)
 
-    # Group strategy
-    config = QConfig(weights_only=True, strategy=QuantizationStrategy.GROUP, group_size=64)
-    assert config.weights_only is True
-    assert config.strategy == QuantizationStrategy.GROUP
+    def test_qweight_args_group_size_without_group_strategy(self):
+        with pytest.raises(ValueError, match="group_size requires strategy to be set to 'group'"):
+            QWeightArgs(group_size=128, strategy=QuantizationStrategy.TENSOR)
 
+        with pytest.raises(ValueError, match="group_size requires strategy to be set to 'group'"):
+            QWeightArgs(group_size=128, strategy=QuantizationStrategy.CHANNEL)
 
-def test_qconfig_static_quantization_full_config():
-    """Test a complete static quantization configuration."""
-    calib_data = np.random.randn(100, 10).astype(np.float32)
-    config = QConfig(
-        is_static=True,
-        weights_only=False,
-        clip_ratio=0.95,
-        reduce_range=False,
-        mse=True,
-        calibration_data=calib_data,
-        activations_dtype=QuantType.QUInt8,
-        activations_symmetric=False,
-        weights_dtype=QuantType.QInt8,
-        weights_symmetric=True,
-    )
-    assert config.is_static is True
-    assert config.weights_only is False
-    assert config.clip_ratio == 0.95
-    assert config.mse is True
-    assert config.calibration_data is not None
+    def test_qweight_args_group_strategy_without_group_size(self):
+        with pytest.raises(ValueError, match="strategy .* requires group_size"):
+            QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=None)
 
+        with pytest.raises(ValueError, match="strategy .* requires group_size"):
+            QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=0)
 
-def test_qconfig_dynamic_quantization():
-    """Test dynamic quantization configuration."""
-    config = QConfig(
-        is_static=False,
-        weights_only=False,
-    )
-    assert config.is_static is False
-    assert config.weights_only is False
+        with pytest.raises(ValueError, match="strategy .* requires group_size"):
+            QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=-1)
 
+    def test_qweight_args_gptq_with_group_strategy(self):
+        with pytest.raises(NotImplementedError, match="GPTQ algorithm only supports"):
+            QWeightArgs(
+                algorithm=GPTQConfig(),
+                strategy=QuantizationStrategy.GROUP,
+                group_size=128,
+            )
 
-def test_qconfig_weights_only_quantization():
-    """Test weights-only quantization configuration."""
-    config = QConfig(
-        weights_only=True,
-        weights_dtype=QuantType.QInt4,
-        weights_symmetric=True,
-    )
-    assert config.weights_only is True
-    assert config.weights_dtype == QuantType.QInt4
+    def test_qweight_args_invalid_scale_dtype(self):
+        with pytest.raises(ValueError, match="Only float32 scale dtype is currently supported."):
+            QWeightArgs(scale_dtype=np.float16)
 
+        with pytest.raises(ValueError, match="Only float32 scale dtype is currently supported."):
+            QWeightArgs(scale_dtype=np.int32)
 
-def test_qconfig_with_all_parameters():
-    """Test QConfig with all parameters specified."""
-    gptq_config = GPTQConfig(block_size=512, percdamp=0.03, actorder=True)
-    calib_data = np.random.randn(50, 20).astype(np.float32)
+    def test_qweight_default_values(self):
+        args = QWeightArgs()
+        assert args.dtype == QuantType.QInt8
+        assert args.strategy == QuantizationStrategy.TENSOR
+        assert args.symmetric is False
+        assert args.scale_dtype == np.dtype(np.float32)
+        assert args.clip_ratio == 1.0
+        assert args.mse is False
+        assert args.group_size is None
 
-    config = QConfig(
-        is_static=True,
-        weights_only=False,
-        clip_ratio=0.99,
-        reduce_range=True,
-        strategy=QuantizationStrategy.CHANNEL,
-        mse=True,
-        calibration_data=calib_data,
-        activations_dtype=QuantType.QUInt8,
-        activations_symmetric=True,
-        weights_dtype=QuantType.QInt8,
-        weights_symmetric=False,
-        algorithm=gptq_config,
-    )
+    def test_qweight_strategy_from_string(self):
+        config = QConfig(weights=QWeightArgs(strategy="tensor"))
+        assert config.weights.strategy == QuantizationStrategy.TENSOR
 
-    assert config.is_static is True
-    assert config.weights_only is False
-    assert config.clip_ratio == 0.99
-    assert config.reduce_range is True
-    assert config.strategy == QuantizationStrategy.CHANNEL
-    assert config.mse is True
-    assert config.calibration_data is not None
-    assert config.activations_dtype == QuantType.QUInt8
-    assert config.activations_symmetric is True
-    assert config.weights_dtype == QuantType.QInt8
-    assert config.weights_symmetric is False
-    assert config.algorithm is not None
-    assert config.algorithm.block_size == 512
+        config = QConfig(weights=QWeightArgs(strategy="channel"))
+        assert config.weights.strategy == QuantizationStrategy.CHANNEL
+
+        config = QConfig(weights=QWeightArgs(strategy="group", group_size=32))
+        assert config.weights.strategy == QuantizationStrategy.GROUP
+
+    def test_qweight_strategy_inference(self):
+        # Tensor quantization (default)
+        args = QWeightArgs(group_size=None)
+        assert args.strategy == QuantizationStrategy.TENSOR
+
+        # Channel quantization
+        args = QWeightArgs(group_size=-1)
+        assert args.strategy == QuantizationStrategy.CHANNEL
+
+        # Group quantization
+        args = QWeightArgs(group_size=32)
+        assert args.strategy == QuantizationStrategy.GROUP
+
+    def test_qweight_string_inputs(self):
+        # Note: strategy needs to match group_size or be inferable.
+        # If we pass explicit strategy, validation will check if it matches group_size.
+        # Here we test conversion from string.
+        # group_size -1 and strategy "channel" are consistent.
+        args = QWeightArgs(dtype="int4", strategy="channel", group_size=-1)
+        assert args.dtype == QuantType.QInt4
+        assert args.strategy == QuantizationStrategy.CHANNEL
+
+    def test_qweight_scale_dtype_valid(self):
+        args = QWeightArgs(scale_dtype=np.float32)
+        assert args.scale_dtype == np.dtype(np.float32)
 
 
-def test_qconfig_minimal_clip_ratio():
-    """Test QConfig with very small but valid clip_ratio."""
-    config = QConfig(clip_ratio=0.0001)
-    assert config.clip_ratio == 0.0001
+class TestQActivationArgs:
+    def test_qactivation_args_strategy_not_supported(self):
+        with pytest.raises(NotImplementedError, match="Activation quantization only supports"):
+            QActivationArgs(strategy=QuantizationStrategy.CHANNEL)
 
+        with pytest.raises(NotImplementedError, match="Activation quantization only supports"):
+            QActivationArgs(strategy=QuantizationStrategy.GROUP, group_size=128)
 
-def test_qconfig_group_size_one():
-    """Test group_size of 1."""
-    config = QConfig(group_size=1, weights_only=True)
-    assert config.group_size == 1
-    assert config.strategy == QuantizationStrategy.GROUP
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt4, QuantType.QUInt4])
+    def test_qactivation_args_qint4_not_supported(self, quant_type):
+        with pytest.raises(NotImplementedError, match="4-bit quantization is not supported"):
+            QActivationArgs(dtype=quant_type)
 
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt32, QuantType.QInt8])
+    def test_qactivation_args_dynamic_qint_not_supported(self, quant_type):
+        with pytest.raises(
+            NotImplementedError, match="Dynamic activation quantization only supports"
+        ):
+            QActivationArgs(dtype=quant_type, is_static=False)
 
-def test_qconfig_large_group_size():
-    """Test very large group_size."""
-    config = QConfig(group_size=10000, weights_only=True)
-    assert config.group_size == 10000
-    assert config.strategy == QuantizationStrategy.GROUP
+    def test_qactivation_defaults(self):
+        qargs = QActivationArgs()
+        assert qargs.dtype == QuantType.QInt8
+        assert qargs.symmetric is False
+        assert qargs.strategy == QuantizationStrategy.TENSOR
+        assert qargs.is_static is True
+        assert qargs.group_size is None
 
+    def test_qactivation_valid_static(self):
+        qargs = QActivationArgs(is_static=True)
+        assert qargs.is_static is True
+        assert qargs.strategy == QuantizationStrategy.TENSOR
 
-def test_qconfig_all_symmetric():
-    """Test configuration with all symmetric quantization."""
-    config = QConfig(
-        activations_symmetric=True,
-        weights_symmetric=True,
-    )
-    assert config.activations_symmetric is True
-    assert config.weights_symmetric is True
+    def test_qactivation_valid_dynamic_uint8(self):
+        qargs = QActivationArgs(dtype=QuantType.QUInt8, is_static=False)
+        assert qargs.dtype == QuantType.QUInt8
+        assert qargs.is_static is False
 
-
-def test_qconfig_all_asymmetric():
-    """Test configuration with all asymmetric quantization."""
-    config = QConfig(
-        activations_symmetric=False,
-        weights_symmetric=False,
-    )
-    assert config.activations_symmetric is False
-    assert config.weights_symmetric is False
-
-
-def test_qconfig_empty_calibration_array():
-    """Test QConfig with empty calibration data."""
-    calib_data = np.array([])
-    config = QConfig(calibration_data=calib_data)
-    assert config.calibration_data is not None
-    assert len(config.calibration_data) == 0
-
-
-def test_qconfig_multidimensional_calibration_data():
-    """Test QConfig with multidimensional calibration data."""
-    calib_data = np.random.randn(10, 5, 3, 224, 224).astype(np.float32)
-    config = QConfig(calibration_data=calib_data)
-    assert config.calibration_data.shape == (10, 5, 3, 224, 224)
-
-
-def test_qconfig_error_message_clip_ratio():
-    """Test error message for invalid clip_ratio."""
-    with pytest.raises(ValueError) as exc_info:
-        QConfig(clip_ratio=1.5)
-    assert "clip_ratio must be in (0.0, 1.0]" in str(exc_info.value)
-    assert "1.5" in str(exc_info.value)
-
-
-def test_qconfig_error_message_group_size_negative():
-    """Test error message for invalid negative group_size."""
-    with pytest.raises(ValueError) as exc_info:
-        QConfig(group_size=-5)
-    assert "Invalid group size" in str(exc_info.value)
-    assert "-5" in str(exc_info.value)
-
-
-def test_qconfig_error_message_gptq_group():
-    """Test error message for GPTQ with GROUP strategy."""
-    with pytest.raises(ValueError) as exc_info:
-        QConfig(
-            algorithm=GPTQConfig(),
-            strategy=QuantizationStrategy.GROUP,
-            group_size=128,
-            weights_only=True,
-        )
-    assert "GPTQ algorithm only supports" in str(exc_info.value)
-
-
-def test_qconfig_error_message_group_without_weights_only():
-    """Test error message for GROUP strategy without weights_only."""
-    with pytest.raises(ValueError) as exc_info:
-        QConfig(group_size=128, weights_only=False)
-    assert "Group quantization is only supported for weights_only" in str(exc_info.value)
-
-
-def test_qconfig_is_pydantic_model():
-    """Test that QConfig is a Pydantic BaseModel."""
-    from pydantic import BaseModel
-
-    config = QConfig()
-    assert isinstance(config, BaseModel)
-
-
-def test_qconfig_model_dump():
-    """Test that QConfig can be dumped to dict."""
-    config = QConfig(clip_ratio=0.95, weights_only=True)
-    config_dict = config.model_dump()
-    assert isinstance(config_dict, dict)
-    assert config_dict["clip_ratio"] == 0.95
-    assert config_dict["weights_only"] is True
-
-
-def test_qconfig_model_dump_json():
-    """Test that QConfig can be serialized to JSON."""
-    config = QConfig(clip_ratio=0.95, weights_only=True, strategy="tensor")
-    json_str = config.model_dump_json()
-    assert isinstance(json_str, str)
-    assert "0.95" in json_str
-    assert "true" in json_str.lower()
-
-
-def test_qconfig_calibration_params():
-    """Test that calibration_params is a CalibrationParams instance."""
-    config = QConfig(calibration_params={"momentum": 0.9, "num_samples": 50, "batch_size": 5})
-    assert hasattr(config, "calibration_params")
-    assert config.calibration_params.momentum == 0.9
-    assert config.calibration_params.num_samples == 50
-    assert config.calibration_params.batch_size == 5
-
-
-def test_qconfig_calibration_params_default():
-    """Test that default calibration_params is used when none provided."""
-    config = QConfig()
-    assert hasattr(config, "calibration_params")
-    assert config.calibration_params.momentum == 0.0
-    assert config.calibration_params.num_samples == 100
-    assert config.calibration_params.method.value == "minmax"
+    def test_qactivation_string_inputs(self):
+        qargs = QActivationArgs(dtype="uint8")
+        assert qargs.dtype == QuantType.QUInt8
+        assert qargs.symmetric is False
