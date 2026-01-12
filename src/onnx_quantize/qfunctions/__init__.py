@@ -2,6 +2,7 @@ import onnx_ir as ir
 
 from onnx_quantize.qfunctions._qdq.qgemm import *
 from onnx_quantize.qfunctions._qdq.qmatmul import *
+from onnx_quantize.qfunctions.factory import *
 from onnx_quantize.qfunctions.register import _QFUNCTIONS, OP_TYPES_TO_QUANTIZE
 
 

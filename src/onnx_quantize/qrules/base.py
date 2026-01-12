@@ -1,10 +1,14 @@
 import onnxscript
 
 from onnx_quantize.core._qconfig import QConfig
+from onnx_quantize.qfunctions.factory import get_qfunction
 
 
 class QRewriter(onnxscript.rewriter.RewriteRuleClassBase):
     """Base class for quantization rewriters."""
+
+    def qfunction(self, op_type: str, qconfig: QConfig):
+        return get_qfunction(op_type, qconfig)
 
     def _rewrite_weights_only(self, op, *args, qconfig):
         raise NotImplementedError()

@@ -9,7 +9,6 @@ from onnx_quantize.core import (
     _preprocess_array,
     _quantize_array,
 )
-from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.qfunctions._qdq.qmatmul import (
     QMatMulWeightDynamicInputOutputQDQ,
     QMatMulWeightDynamicInputQDQ,
@@ -20,7 +19,6 @@ from onnx_quantize.qfunctions._qdq.qmatmul import (
     QMatMulWeightStaticOutputQDQ,
     _make_qmatmul_weight_only_grouped,
     _make_qmatmul_weight_only_grouped_4bits,
-    qmatmul_qdq_factory,
 )
 
 
@@ -482,94 +480,3 @@ def test_qmatmul_weights_only_grouped_4bits_function_proto():
 
     function_proto = QMatMulWeightsOnlyGrouped4bits.to_function_proto()
     onnx.checker.check_function(function_proto)
-
-
-def test_qmatmul_qdq_factory_weights_only():
-    qconfig = QConfig(weights=QWeightArgs(dtype=QuantType.QInt8))
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightsOnlyQDQ"
-
-
-def test_qmatmul_qdq_factory_static_input():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        input_activations=QActivationArgs(dtype=QuantType.QInt8, is_static=True),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightStaticInputQDQ"
-
-
-def test_qmatmul_qdq_factory_static_output():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        output_activations=QActivationArgs(dtype=QuantType.QInt8, is_static=True),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightStaticOutputQDQ"
-
-
-def test_qmatmul_qdq_factory_static_input_output():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        input_activations=QActivationArgs(dtype=QuantType.QInt8, is_static=True),
-        output_activations=QActivationArgs(dtype=QuantType.QInt8, is_static=True),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightStaticInputOutputQDQ"
-
-
-def test_qmatmul_qdq_factory_dynamic_input():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightDynamicInputQDQ"
-
-
-def test_qmatmul_qdq_factory_dynamic_output():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        output_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightDynamicOutputQDQ"
-
-
-def test_qmatmul_qdq_factory_dynamic_input_output():
-    qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QInt8),
-        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
-        output_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightDynamicInputOutputQDQ"
-
-
-def test_qmatmul_qdq_factory_grouped():
-    qconfig = QConfig(
-        weights=QWeightArgs(
-            dtype=QuantType.QInt8, strategy=QuantizationStrategy.GROUP, group_size=32
-        )
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightsOnlyGrouped"
-
-
-def test_qmatmul_qdq_factory_grouped_4bits():
-    qconfig = QConfig(
-        weights=QWeightArgs(
-            dtype=QuantType.QInt4, strategy=QuantizationStrategy.GROUP, group_size=32
-        )
-    )
-
-    result = qmatmul_qdq_factory(qconfig).__name__
-    assert result == "QMatMulWeightsOnlyGrouped"

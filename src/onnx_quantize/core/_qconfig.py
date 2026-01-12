@@ -253,6 +253,43 @@ class QConfig(BaseModel):
 
         return value
 
+    def _check_qlinear_format_constraints(self) -> None:
+        # TODO: some checks overlaps with other parts, refactor later
+        if self.input_activations is None or self.output_activations is None:
+            raise ValueError(
+                "QLinear format requires both input and output activation quantization."
+            )
+
+        if not (self.input_activations.is_static and self.output_activations.is_static):
+            raise ValueError(
+                "QLinear format requires both input and output activations "
+                "quantization to be static."
+            )
+
+        if self.weights.strategy == QuantizationStrategy.GROUP:
+            raise NotImplementedError(
+                "QLinear format does not support grouped weight quantization."
+            )
+
+        # dtypes for weights and activations should be int8 or uint8
+        valid_dtypes = {QuantType.QInt8, QuantType.QUInt8}
+        if self.weights.dtype not in valid_dtypes:
+            raise ValueError(
+                f"QLinear format supports only int8/uint8 for weights, got {self.weights.dtype}."
+            )
+
+        if self.input_activations.dtype not in valid_dtypes:
+            raise ValueError(
+                f"QLinear format supports only int8/uint8 for input activations, got "
+                f"{self.input_activations.dtype}."
+            )
+
+        if self.output_activations.dtype not in valid_dtypes:
+            raise ValueError(
+                f"QLinear format supports only int8/uint8 for output activations, got "
+                f"{self.output_activations.dtype}."
+            )
+
     @model_validator(mode="after")
     def validate_model_after(self: QConfig) -> QConfig:
         # Check if everything is None
@@ -284,7 +321,7 @@ class QConfig(BaseModel):
                     "Both input and output activations must be either both static or dynamic."
                 )
 
-        if self.format != QFormat.QDQ:
-            raise NotImplementedError("Only QDQ format is currently supported.")
+        if self.format == QFormat.QLINEAR:
+            self._check_qlinear_format_constraints()
 
         return self
