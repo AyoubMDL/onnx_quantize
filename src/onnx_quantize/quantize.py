@@ -13,7 +13,7 @@ from onnx_quantize.core._qconfig import GPTQConfig, QConfig
 from onnx_quantize.opset import op
 from onnx_quantize.pre_rules import pre_rules
 from onnx_quantize.qfunctions import get_qfunctions
-from onnx_quantize.qrules import qrules
+from onnx_quantize.qrules import get_qrules
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
 
     # Apply quantization rules to rewrite the model
     logger.info("Applying quantization rules...")
+    qrules = get_qrules(qconfig.format)
     model = onnxscript.rewriter.rewrite(model, qrules)
 
     # Update opset version

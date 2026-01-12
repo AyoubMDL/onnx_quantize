@@ -252,6 +252,35 @@ def test_quantize_weights_inputs_outputs(rng, model_fn, is_static, dtype, symmet
     _test_quantize(model, qconfig, calibration_data)
 
 
+@pytest.mark.parametrize("dtype", [QuantType.QInt8, QuantType.QUInt8])
+@pytest.mark.parametrize("strategy", ["tensor", "channel"])
+@pytest.mark.parametrize("symmetric", [True, False])
+@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model, _get_matmul_add_model])
+def test_quantize_weights_inputs_outputs_qlinear_format(rng, model_fn, dtype, symmetric, strategy):
+    model = model_fn(rng)
+    calibration_data = _truncated_normal(rng, (2, 32))
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=dtype,
+            strategy=strategy,
+            symmetric=symmetric,
+        ),
+        input_activations=QActivationArgs(
+            dtype=dtype,
+            is_static=True,
+        ),
+        output_activations=QActivationArgs(
+            dtype=dtype,
+            is_static=True,
+        ),
+        calibration_data=calibration_data,
+        format="qlinear",
+    )
+
+    _test_quantize(model, qconfig, calibration_data)
+
+
 def test_no_quantization_needed(rng):
     model = _get_matmul_model(rng)
 

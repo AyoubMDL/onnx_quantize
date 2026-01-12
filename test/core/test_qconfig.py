@@ -6,6 +6,7 @@ from onnx_quantize import (
     GPTQConfig,
     QActivationArgs,
     QConfig,
+    QFormat,
     QuantizationStrategy,
     QuantType,
     QWeightArgs,
@@ -134,11 +135,64 @@ class TestQConfig:
                 output_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=not is_static),
             )
 
-    def test_qconfig_qlinear_format_not_supported(self):
-        """Test that QLinear format raises NotImplementedError."""
-        with pytest.raises(NotImplementedError, match="Only QDQ format is currently supported"):
+    def test_qconfig_qlinear_format(self):
+        """Test that QLinear format can be created with valid configuration."""
+        qconfig = QConfig(
+            weights=QWeightArgs(),
+            input_activations=QActivationArgs(is_static=True),
+            output_activations=QActivationArgs(is_static=True),
+            format="qlinear",
+        )
+        assert qconfig.format == QFormat.QLINEAR
+
+    def test_qconfig_qlinear_missing_input_activations(self):
+        with pytest.raises(ValueError, match="QLinear format requires both input and output"):
             QConfig(
                 weights=QWeightArgs(),
+                output_activations=QActivationArgs(is_static=True),
+                format="qlinear",
+            )
+
+    def test_qconfig_qlinear_missing_output_activations(self):
+        with pytest.raises(ValueError, match="QLinear format requires both input and output"):
+            QConfig(
+                weights=QWeightArgs(),
+                input_activations=QActivationArgs(is_static=True),
+                format="qlinear",
+            )
+
+    def test_qconfig_qlinear_dynamic_activations(self):
+        with pytest.raises(
+            ValueError, match="QLinear format requires both input and output activations.*static"
+        ):
+            QConfig(
+                weights=QWeightArgs(),
+                input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
+                output_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=False),
+                format="qlinear",
+            )
+
+    @pytest.mark.parametrize("input_dtype", [QuantType.QInt32, QuantType.QUInt32])
+    def test_qconfig_qlinear_invalid_input_activation_dtype(self, input_dtype):
+        with pytest.raises(
+            ValueError, match="QLinear format supports only int8/uint8 for input activations"
+        ):
+            QConfig(
+                weights=QWeightArgs(),
+                input_activations=QActivationArgs(dtype=input_dtype, is_static=True),
+                output_activations=QActivationArgs(is_static=True),
+                format="qlinear",
+            )
+
+    @pytest.mark.parametrize("output_dtype", [QuantType.QInt32, QuantType.QUInt32])
+    def test_qconfig_qlinear_invalid_output_activation_dtype(self, output_dtype):
+        with pytest.raises(
+            ValueError, match="QLinear format supports only int8/uint8 for output activations"
+        ):
+            QConfig(
+                weights=QWeightArgs(),
+                input_activations=QActivationArgs(is_static=True),
+                output_activations=QActivationArgs(dtype=output_dtype, is_static=True),
                 format="qlinear",
             )
 
