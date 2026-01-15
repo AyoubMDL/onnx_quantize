@@ -3,7 +3,7 @@ import onnx
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core import _dequantize_array, _quantize_array
+from onnx_quantize.core._rtn import _dequantize_array, _quantize_array
 from onnx_quantize.qfunctions._qlinear.qmatmul import QLinearMatMul
 
 

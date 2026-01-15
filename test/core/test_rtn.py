@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core import (
+from onnx_quantize.core._rtn import (
     _compute_min_max,
     _compute_min_max_mse,
     _compute_qparams_from_array,

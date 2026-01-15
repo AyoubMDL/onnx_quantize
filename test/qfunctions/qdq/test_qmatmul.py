@@ -3,7 +3,7 @@ import onnx
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core import (
+from onnx_quantize.core._rtn import (
     _dequantize_array,
     _post_process_array,
     _preprocess_array,

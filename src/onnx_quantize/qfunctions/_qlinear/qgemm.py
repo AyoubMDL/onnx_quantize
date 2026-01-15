@@ -8,7 +8,7 @@ from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
 op_ms = onnxscript.values.Opset("com.microsoft", version=1)
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction(target_optype="Gemm")
 @script(opset=QUANT_OPSET)
 def QLinearGemm(
     X,
@@ -23,7 +23,7 @@ def QLinearGemm(
 ):
     """Fully quantized Gemm with weight, bias, input, and output activation quantization.
 
-    Uses QLinearMatMul with all quantization parameters.
+    Uses QLinearGemm with all quantization parameters.
     """
     # Quantize input activation
     x_quantized = op.QuantizeLinear(X, x_scale, x_zero_point)
