@@ -82,11 +82,6 @@ def _test_gemm_to_qgemm(rng, model, qconfig):
 def test_gemm_to_qgemm_weights_only(rng, strategy, group_size, algo):
     model = _get_test_model(rng)
 
-    if isinstance(algo, GPTQConfig):
-        # GPTQ only supports tensor/channel quantization
-        strategy = "tensor"
-        group_size = None
-
     # Create QConfig with new structure
     qconfig = QConfig(
         weights=QWeightArgs(

@@ -72,11 +72,6 @@ def _test_matmul_to_qmatmul(rng, model, qconfig):
 def test_matmul_to_qmatmul_weights_only(rng, strategy, group_size, algo):
     model = _get_test_model(rng)
 
-    if isinstance(algo, GPTQConfig):
-        # GPTQ only supports tensor/channel quantization
-        strategy = "tensor"
-        group_size = None
-
     # Create QConfig with new structure
     qconfig = QConfig(
         weights=QWeightArgs(

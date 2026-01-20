@@ -11,6 +11,7 @@ from onnx_quantize.core._qconfig import QuantizationStrategy
 from onnx_quantize.core._rtn import (
     _compute_qparams_from_array,
     _dequantize_array,
+    _preprocess_array,
     _quantize_array_from_qparams,
 )
 
@@ -32,6 +33,12 @@ def _gptq(
     actorder=False,
     mse=False,
 ):
+    used_strategy = strategy
+    if strategy == QuantizationStrategy.GROUP:
+        # While quantizing, a slice with size group_size will be used,
+        # and therefore it is equivalent to CHANNEL strategy here.
+        used_strategy = QuantizationStrategy.CHANNEL
+
     # Create writable copies of the input arrays
     W = W.copy()
     H = H.copy()
@@ -41,7 +48,7 @@ def _gptq(
     scale, zp = _compute_qparams_from_array(
         W.T,
         quant_type=quant_type,
-        strategy=strategy,
+        strategy=used_strategy,
         group_size=-1,
         is_symmetric=is_symmetric,
         clip_ratio=clip_ratio,
@@ -100,12 +107,14 @@ def _gptq(
             w = W1[i, :]
             d = Hinv1[i, i]
 
-            if group_size != -1:
+            if group_size and group_size != -1:
                 if (i1 + i) % group_size == 0:
+                    # Since we're only applying quantization to a slice, this
+                    # ends up being a channelwise application
                     scale, zp = _compute_qparams_from_array(
                         W[(i1 + i) : (i1 + i + group_size), :].T,
                         quant_type=quant_type,
-                        strategy=strategy,
+                        strategy=QuantizationStrategy.CHANNEL,
                         group_size=-1,
                         is_symmetric=is_symmetric,
                         reduce_range=reduce_range,
@@ -145,6 +154,26 @@ def _gptq(
 
     Q = np.reshape(Q, W.shape)
     Q_int = Q_int.reshape(W.shape).astype(quant_type.np_dtype)
+
+    # Recompute scale and zero point to return in case of group quantization
+    Q = _preprocess_array(Q, strategy, group_size)
+    scale, zp = _compute_qparams_from_array(
+        Q,
+        quant_type,
+        strategy,
+        group_size,
+        is_symmetric,
+        reduce_range,
+        clip_ratio=clip_ratio,
+        mse=mse,
+    )
+
+    # TODO: this line is also done for rtn quantization
+    # Squeeze scale and zero_point to remove unnecessary dimensions (ort constraint)
+    # For group quantization, extra dimension is needed
+    if strategy in {QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL}:
+        scale, zp = np.squeeze(scale), np.squeeze(zp)
+
     scale = scale.astype(np.float32)
     zp = zp.astype(Q_int.dtype)
     del W
