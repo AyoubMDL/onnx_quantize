@@ -19,7 +19,7 @@ def test_quantize_bert_weights_only(tmp_path):
     model = onnx.load(tmp_path / "model.onnx")
 
     qconfig = QConfig(
-        weights=QWeightArgs(dtype=QuantType.QUInt8, symmetric=True, strategy="tensor")
+        weights=QWeightArgs(dtype=QuantType.QUInt8, symmetric=False, strategy="channel")
     )
     qmodel = quantize(model, qconfig)
     onnx.save(qmodel, tmp_path / "quantized_model.onnx")
@@ -45,5 +45,5 @@ def test_quantize_bert_weights_only(tmp_path):
         preds = outputs.logits.argmax(dim=-1)
         correct += (preds == batch["label"]).sum().item()
 
-    # TODO: float has about 0.94
-    assert correct / len(dataset) == 0.91
+    # float has 0.94
+    assert correct / len(dataset) == 0.94
