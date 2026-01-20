@@ -4,6 +4,7 @@ import onnxscript
 _QFUNCTIONS = []
 OP_TYPES_TO_QUANTIZE = set()
 QUANT_OPSET = onnxscript.values.Opset(domain="quant", version=1)
+MS_OPSET = onnxscript.values.Opset("com.microsoft", version=1)
 
 
 def register_qfunction(_func=None, *, target_optype=None):

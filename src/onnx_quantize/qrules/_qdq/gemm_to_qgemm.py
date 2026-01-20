@@ -2,7 +2,7 @@ import onnx_ir as ir
 
 from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy, QWeightArgs
 from onnx_quantize.qfunctions import QUANT_OPSET
-from onnx_quantize.qrules._common import quantize_weights
+from onnx_quantize.qrules._common import is_matmul_nbits_compatible, quantize_weights
 from onnx_quantize.qrules._qdq.matmul_to_qmatmul import MatMulToQMatMul
 
 
@@ -114,7 +114,7 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             _version=QUANT_OPSET.version,
         )
 
-    def _rewrite_weights_only(self, op, x, w, b, out, qconfig: QConfig):
+    def _rewrite_weights_only_standard(self, op, x, w, b, out, qconfig: QConfig):
         qfunc_name = self.qfunction(self.op_type, qconfig).__name__
 
         # Quantize the weights
@@ -138,6 +138,12 @@ class GemmBiasToQGemmBias(GemmToQGemm):
             _domain=QUANT_OPSET.domain,
             _version=QUANT_OPSET.version,
         )
+
+    def _rewrite_weights_only(self, op, x, w, b, out, qconfig: QConfig):
+        if is_matmul_nbits_compatible(qconfig, w.name):
+            return self._rewrite_weights_only_matmul_nbits(op, x, w, out, qconfig, bias=b)
+
+        return self._rewrite_weights_only_standard(op, x, w, b, out, qconfig)
 
     def rewrite(self, op, x, w, b, out):
         return self._rewrite(op, x, w, b, out)

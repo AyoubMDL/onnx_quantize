@@ -256,12 +256,14 @@ class TestQWeightArgs:
             QWeightArgs(strategy=QuantizationStrategy.GROUP, group_size=-1)
 
     def test_qweight_args_gptq_with_group_strategy(self):
-        with pytest.raises(NotImplementedError, match="GPTQ algorithm only supports"):
-            QWeightArgs(
-                algorithm=GPTQConfig(),
-                strategy=QuantizationStrategy.GROUP,
-                group_size=128,
-            )
+        args = QWeightArgs(
+            algorithm=GPTQConfig(),
+            strategy=QuantizationStrategy.GROUP,
+            group_size=128,
+        )
+        assert isinstance(args.algorithm, GPTQConfig)
+        assert args.strategy == QuantizationStrategy.GROUP
+        assert args.group_size == 128
 
     def test_qweight_args_invalid_scale_dtype(self):
         with pytest.raises(ValueError, match="Only float32 scale dtype is currently supported."):

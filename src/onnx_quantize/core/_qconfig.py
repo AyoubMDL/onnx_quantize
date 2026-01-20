@@ -30,13 +30,11 @@ class GPTQConfig(BaseModel):
     Args:
         block_size (int, optional): GPTQ block size. Defaults to 128.
         percdamp (float, optional): GPTQ percent of damping. Defaults to 0.01.
-        group_size (int, optional): GPTQ group size. Defaults to -1.
         actorder (bool, optional): GPTQ activation order. Defaults to False.
     """
 
     block_size: int = 128
     percdamp: float = 0.01
-    group_size: int = -1
     actorder: bool = False
 
 
@@ -157,18 +155,6 @@ class QWeightArgs(_BaseArgs):
         if not (0.0 < value <= 1.0):
             raise ValueError(f"clip_ratio must be in (0.0, 1.0], got {value}")
         return value
-
-    @model_validator(mode="after")
-    def validate_model_after(self: QWeightArgs) -> QWeightArgs:
-        self = super().validate_model_after()
-        if isinstance(self.algorithm, GPTQConfig) and self.strategy not in {
-            QuantizationStrategy.TENSOR,
-            QuantizationStrategy.CHANNEL,
-        }:
-            raise NotImplementedError(
-                "GPTQ algorithm only supports 'tensor' or 'channel' quantization."
-            )
-        return self
 
 
 class QActivationArgs(_BaseArgs):
@@ -304,6 +290,8 @@ class QConfig(BaseModel):
             raise ValueError("Activation only quantization is not supported.")
 
         weights_only = self.input_activations is None and self.output_activations is None
+
+        # TODO: Maybe allow weights to be 4bits with 8bits activations
         if (not weights_only) and self.weights.dtype in {QuantType.QInt4, QuantType.QUInt4}:
             raise NotImplementedError(
                 "4-bit quantization is only supported for weights_only quantization."
