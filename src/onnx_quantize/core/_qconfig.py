@@ -290,6 +290,8 @@ class QConfig(BaseModel):
             raise ValueError("Activation only quantization is not supported.")
 
         weights_only = self.input_activations is None and self.output_activations is None
+
+        # TODO: Maybe allow weights to be 4bits with 8bits activations
         if (not weights_only) and self.weights.dtype in {QuantType.QInt4, QuantType.QUInt4}:
             raise NotImplementedError(
                 "4-bit quantization is only supported for weights_only quantization."

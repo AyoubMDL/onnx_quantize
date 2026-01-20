@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import onnx_ir as ir
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
@@ -13,6 +14,7 @@ from onnx_quantize.core._rtn import (
     _quantize_array,
     _quantize_bias,
 )
+from onnx_quantize.qrules._common import _resolve_group_size
 
 
 @pytest.mark.parametrize(
@@ -136,6 +138,10 @@ def test_get_quantization_params_group(quant_type, symmetric, group_size, mse):
     """Test get_quantization_params with group quantization."""
     fp_array = np.ones((32, 64), dtype=np.float32)
     in_channels, out_channels = fp_array.shape
+
+    # Resolve group size (this would be done in the quantization pipeline)
+    w_val = ir.val("weights", shape=fp_array.shape, const_value=ir.tensor(fp_array))
+    group_size = _resolve_group_size(w_val, group_size)
 
     # Preprocess before computing qparams
     fp_array = _preprocess_array(fp_array, QuantizationStrategy.GROUP, group_size)

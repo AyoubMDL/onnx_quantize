@@ -4,8 +4,8 @@ import onnx_ir as ir
 import onnxscript
 
 from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy
-from onnx_quantize.qfunctions import QUANT_OPSET
-from onnx_quantize.qrules._common import quantize_weights
+from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
+from onnx_quantize.qrules._common import is_matmul_nbits_compatible, quantize_weights
 from onnx_quantize.qrules.base import QRewriter
 
 
@@ -46,7 +46,7 @@ class MatMulToQMatMul(QRewriter):
 
         return scale, zero_point
 
-    def _rewrite_weights_only(self, op, x, w, out, qconfig: QConfig):
+    def _rewrite_weights_only_standard(self, op, x, w, out, qconfig: QConfig):
         qfunc_name = self.qfunction(self.op_type, qconfig).__name__
         w_q, w_scale, w_zero_point = quantize_weights(op, w, qconfig, out)
 
@@ -65,6 +65,37 @@ class MatMulToQMatMul(QRewriter):
             _domain=QUANT_OPSET.domain,
             _version=QUANT_OPSET.version,
         )
+
+    def _rewrite_weights_only_matmul_nbits(self, op, x, w, out, qconfig: QConfig, *, bias=None):
+        w_q, w_scale, w_zero_point = quantize_weights(
+            op, w, qconfig, out, is_matmul_nbits_compatible=True
+        )
+
+        # Prepare MatMulNBits arguments and attributes
+        K, N = w.const_value.numpy().shape
+        bits = qconfig.weights.dtype.bitwidth
+        block_size = qconfig.weights.group_size
+        func_args = [x, w_q, w_scale, w_zero_point, None]
+
+        # Add bias if provided
+        if bias is not None:
+            func_args.append(bias)
+
+        return op.MatMulNBits(
+            *func_args,
+            K=K,
+            N=N,
+            bits=bits,
+            block_size=block_size,
+            _domain=MS_OPSET.domain,
+            _version=MS_OPSET.version,
+        )
+
+    def _rewrite_weights_only(self, op, x, w, out, qconfig: QConfig):
+        if is_matmul_nbits_compatible(qconfig, w.name):
+            return self._rewrite_weights_only_matmul_nbits(op, x, w, out, qconfig)
+
+        return self._rewrite_weights_only_standard(op, x, w, out, qconfig)
 
     def _rewrite_dynamic(self, op, x, w, out, qconfig: QConfig):
         # 1. Quantize the weights

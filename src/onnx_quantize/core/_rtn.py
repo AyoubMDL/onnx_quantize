@@ -12,7 +12,6 @@ __all__ = [
     "_quantize_bias",
 ]
 
-import math
 
 import numpy as np
 
@@ -21,29 +20,6 @@ from onnx_quantize.core._qconfig import QuantizationStrategy
 
 
 def _preprocess_array(array, strategy, group_size=-1):
-    def pad_array(array, group_size, num_groups):
-        """Pad array rows so that it can be is divisible by group_size.
-
-        Args:
-            array (np.ndarray): weight
-            group_size (int): how many elements share one scale/zp
-            num_groups (int): the number of groups
-
-        Returns:
-            weight: paded weight
-        """
-        if group_size == -1:
-            return array
-
-        org_shape = array.shape
-        padded_rows = num_groups * group_size
-        pad_len = padded_rows - org_shape[0]
-
-        if pad_len > 0:
-            array = np.pad(array, ((0, pad_len), (0, 0)), "constant")
-
-        return array
-
     assert isinstance(strategy, QuantizationStrategy)
 
     if strategy == QuantizationStrategy.TENSOR:
@@ -54,10 +30,12 @@ def _preprocess_array(array, strategy, group_size=-1):
 
     elif strategy == QuantizationStrategy.GROUP:
         in_channels = array.shape[0]
-        group_size = group_size if group_size != -1 else in_channels
-        num_groups = math.ceil(in_channels / group_size)
-        array = pad_array(array, group_size, num_groups)
 
+        # Adjust group size if it is larger than in_channels
+        if group_size > in_channels:
+            group_size = in_channels
+
+        group_size = group_size if group_size != -1 else in_channels
         # (in_channels, out_channels) -> (out_channels x num_groups , group_size)
         array = array.T.reshape((-1, group_size))
 

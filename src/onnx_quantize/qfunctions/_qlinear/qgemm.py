@@ -1,11 +1,7 @@
-import onnxscript
 from onnxscript import script
 
 from onnx_quantize.opset import op
-from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
-
-
-op_ms = onnxscript.values.Opset("com.microsoft", version=1)
+from onnx_quantize.qfunctions.register import MS_OPSET, QUANT_OPSET, register_qfunction
 
 
 @register_qfunction(target_optype="Gemm")
@@ -28,7 +24,7 @@ def QLinearGemm(
     # Quantize input activation
     x_quantized = op.QuantizeLinear(X, x_scale, x_zero_point)
 
-    matmul_out = op_ms.QGemm(
+    matmul_out = MS_OPSET.QGemm(
         x_quantized,
         x_scale,
         x_zero_point,

@@ -2,6 +2,7 @@ import onnxscript
 
 from onnx_quantize.core._qconfig import QConfig
 from onnx_quantize.qfunctions.factory import get_qfunction
+from onnx_quantize.qrules._common import _resolve_group_size
 
 
 class QRewriter(onnxscript.rewriter.RewriteRuleClassBase):
@@ -33,6 +34,9 @@ class QRewriter(onnxscript.rewriter.RewriteRuleClassBase):
             qconfig.output_activations is not None and qconfig.output_activations.is_static
         )
         is_static = static_input or static_output
+
+        # Resolve weight group size
+        qconfig.weights.group_size = _resolve_group_size(args[1], qconfig.weights.group_size)
 
         if weights_only:
             return self._rewrite_weights_only(op, *args, qconfig=qconfig)

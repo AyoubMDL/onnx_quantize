@@ -1,7 +1,13 @@
 import onnx_ir as ir
+import onnxscript
 
 from onnx_quantize.qfunctions.factory import *
-from onnx_quantize.qfunctions.register import _QFUNCTIONS, OP_TYPES_TO_QUANTIZE, QUANT_OPSET
+from onnx_quantize.qfunctions.register import (
+    _QFUNCTIONS,
+    MS_OPSET,
+    OP_TYPES_TO_QUANTIZE,
+    QUANT_OPSET,
+)
 
 
 def get_qfunctions():

@@ -67,19 +67,9 @@ def _test_gemm_to_qgemm(rng, model, qconfig):
     onnx_forward_on_models(proto, samples={"X": samples})
 
 
-@pytest.mark.parametrize(
-    "strategy, group_size",
-    [
-        ("tensor", None),
-        ("tensor", None),
-        ("channel", None),
-        ("channel", None),
-        ("group", 16),
-        ("group", 8),
-    ],
-)
+@pytest.mark.parametrize("strategy", ["tensor", "channel"])
 @pytest.mark.parametrize("algo", [None, GPTQConfig()])
-def test_gemm_to_qgemm_weights_only(rng, strategy, group_size, algo):
+def test_gemm_to_qgemm_weights_only(rng, strategy, algo):
     model = _get_test_model(rng)
 
     # Create QConfig with new structure
@@ -87,7 +77,6 @@ def test_gemm_to_qgemm_weights_only(rng, strategy, group_size, algo):
         weights=QWeightArgs(
             dtype=QuantType.QUInt8,
             strategy=strategy,
-            group_size=group_size,
             algorithm=algo,
         )
     )
@@ -95,6 +84,39 @@ def test_gemm_to_qgemm_weights_only(rng, strategy, group_size, algo):
     if isinstance(algo, GPTQConfig):
         calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul", "Gemm"})
     _test_gemm_to_qgemm(rng, model, qconfig)
+
+
+@pytest.mark.parametrize("group_size", [16, 128])
+@pytest.mark.parametrize("algo", [None, GPTQConfig()])
+def test_gemm_to_qgemm_weights_only_gemm_nbits(rng, group_size, algo):
+    model = _get_test_model(rng)
+
+    # Create QConfig with new structure
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt8,
+            strategy="group",
+            group_size=group_size,
+            algorithm=algo,
+        )
+    )
+
+    if isinstance(algo, GPTQConfig):
+        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul", "Gemm"})
+
+    _add_qconfig_to_nodes(model, qconfig)
+    model = onnxscript.rewriter.rewrite(model, gemm_to_qdq_gemm_rules)
+
+    for node in model.graph:
+        assert node.op_type == "MatMulNBits"
+
+    # Check model
+    proto = ir.to_proto(model)
+    onnx.checker.check_model(proto)
+
+    # Check that inference runs without error
+    samples = rng.uniform(size=(1, 32)).astype(np.float32)
+    onnx_forward_on_models(proto, samples={"X": samples})
 
 
 @pytest.mark.parametrize("is_static", [True, False])
