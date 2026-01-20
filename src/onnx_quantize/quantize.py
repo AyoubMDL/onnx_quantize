@@ -78,7 +78,7 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
 
     # Run pre rules quant
     logger.info("Applying pre-quantization rules...")
-    model = onnxscript.rewriter.rewrite(model, pre_rules)
+    model = pre_rules(model).model
 
     # Calibrate the model to compute quantization parameters
     if _needs_calibration(qconfig):
