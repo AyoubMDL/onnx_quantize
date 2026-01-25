@@ -178,6 +178,8 @@ def _set_qparams(
                     qargs.dtype,
                     qargs.symmetric,
                     qargs.reduce_range,
+                    qargs.scale_dtype,
+                    qargs.zp_dtype,
                 )
             )
 

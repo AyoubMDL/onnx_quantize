@@ -11,8 +11,8 @@ from onnx_quantize.core._rtn import (
     _compute_qparams_from_array,
     _dequantize_array,
     _preprocess_array,
-    _quantize_array,
     _quantize_bias,
+    _rtn_quantize,
 )
 from onnx_quantize.qrules._common import _resolve_group_size
 
@@ -54,6 +54,8 @@ def test_get_quantization_params_scalar(
         reduce_range=False,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Scale should be positive
@@ -101,6 +103,8 @@ def test_get_quantization_params_per_channel(fp_array, quant_type, symmetric, ms
         reduce_range=False,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Should return arrays with length equal to last dimension
@@ -155,6 +159,8 @@ def test_get_quantization_params_group(quant_type, symmetric, group_size, mse):
         reduce_range=False,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Calculate expected number of groups
@@ -224,6 +230,8 @@ def test_calculate_mse_min_max(rng, grid, patience, reduce_range, strategy, grou
         group_size=group_size,
         is_symmetric=False,
         reduce_range=reduce_range,
+        scale_dtype=np.float32,
+        zp_dtype=np.int8,
         grid=grid,
         patience=patience,
     )
@@ -254,7 +262,7 @@ def test_quantize_array_tensor_strategy(rng, quant_type, symmetric, reduce_range
     # Create random array
     fp_array = rng.standard_normal((16, 32), dtype=np.float32)
 
-    q_array, scale, zero_point = _quantize_array(
+    q_array, scale, zero_point = _rtn_quantize(
         fp_array,
         quant_type=quant_type,
         strategy=QuantizationStrategy.TENSOR,
@@ -263,6 +271,8 @@ def test_quantize_array_tensor_strategy(rng, quant_type, symmetric, reduce_range
         reduce_range=reduce_range,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Check output shapes
@@ -313,7 +323,7 @@ def test_quantize_array_channel_strategy(rng, quant_type, symmetric, reduce_rang
     in_channels, out_channels = 32, 64
     fp_array = rng.standard_normal((in_channels, out_channels), dtype=np.float32)
 
-    q_array, scale, zero_point = _quantize_array(
+    q_array, scale, zero_point = _rtn_quantize(
         fp_array,
         quant_type=quant_type,
         strategy=QuantizationStrategy.CHANNEL,
@@ -322,6 +332,8 @@ def test_quantize_array_channel_strategy(rng, quant_type, symmetric, reduce_rang
         reduce_range=reduce_range,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Check output shapes
@@ -382,7 +394,7 @@ def test_quantize_array_group_strategy(rng, quant_type, symmetric, reduce_range,
     in_channels, out_channels = 32, 64
     fp_array = rng.standard_normal((in_channels, out_channels), dtype=np.float32)
 
-    q_array, scale, zero_point = _quantize_array(
+    q_array, scale, zero_point = _rtn_quantize(
         fp_array,
         quant_type=quant_type,
         strategy=QuantizationStrategy.GROUP,
@@ -391,6 +403,8 @@ def test_quantize_array_group_strategy(rng, quant_type, symmetric, reduce_range,
         reduce_range=reduce_range,
         clip_ratio=1.0,
         mse=mse,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Check output shapes
@@ -443,7 +457,7 @@ def test_quantize_array_edge_case_all_zeros():
     """Test _quantize_array with all zeros."""
     fp_array = np.zeros((4, 4), dtype=np.float32)
 
-    q_array, scale, zero_point = _quantize_array(
+    q_array, scale, zero_point = _rtn_quantize(
         fp_array,
         quant_type=QuantType.QInt8,
         strategy=QuantizationStrategy.TENSOR,
@@ -452,6 +466,8 @@ def test_quantize_array_edge_case_all_zeros():
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=np.int8,
     )
 
     # All quantized values should be at zero point
@@ -468,7 +484,7 @@ def test_quantize_array_edge_case_single_value():
     """Test _quantize_array with single unique value."""
     fp_array = np.full((3, 3), 5.0, dtype=np.float32)
 
-    q_array, scale, zero_point = _quantize_array(
+    q_array, scale, zero_point = _rtn_quantize(
         fp_array,
         quant_type=QuantType.QInt8,
         strategy=QuantizationStrategy.TENSOR,
@@ -477,6 +493,8 @@ def test_quantize_array_edge_case_single_value():
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=np.int8,
     )
 
     # Dequantize and check we get close to original value

@@ -7,7 +7,7 @@ from onnx_quantize.core._rtn import (
     _dequantize_array,
     _post_process_array,
     _preprocess_array,
-    _quantize_array,
+    _rtn_quantize,
 )
 from onnx_quantize.qfunctions._qdq.qgemm import (
     QGemmWeightDynamicInputOutputQDQ,
@@ -49,7 +49,7 @@ def test_qgemm_weights_only_qdq_outputs(rng, quant_type, is_symmetric, strategy)
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -58,10 +58,12 @@ def test_qgemm_weights_only_qdq_outputs(rng, quant_type, is_symmetric, strategy)
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias (using int32 for bias)
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -70,6 +72,8 @@ def test_qgemm_weights_only_qdq_outputs(rng, quant_type, is_symmetric, strategy)
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightsOnlyQDQ(inputs, w_q, b_q, w_scale, w_zero_point, b_scale, b_zero_point)
@@ -117,7 +121,7 @@ def test_qgemm_weight_input_qdq_outputs(rng, quant_type, is_symmetric):
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -126,10 +130,12 @@ def test_qgemm_weight_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize inputs
-    x_q, x_scale, x_zero_point = _quantize_array(
+    x_q, x_scale, x_zero_point = _rtn_quantize(
         inputs,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -138,10 +144,12 @@ def test_qgemm_weight_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -150,6 +158,8 @@ def test_qgemm_weight_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightInputQDQ(
@@ -196,7 +206,7 @@ def test_qgemm_weight_output_qdq_outputs(rng, quant_type, is_symmetric):
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -205,10 +215,12 @@ def test_qgemm_weight_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -217,6 +229,8 @@ def test_qgemm_weight_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Compute expected output to determine output scale
@@ -225,7 +239,7 @@ def test_qgemm_weight_output_qdq_outputs(rng, quant_type, is_symmetric):
     intermediate_output = np.matmul(inputs, w_dequantized) + b_dequantized
 
     # Quantize output
-    out_q, out_scale, out_zero_point = _quantize_array(
+    out_q, out_scale, out_zero_point = _rtn_quantize(
         intermediate_output,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -234,6 +248,8 @@ def test_qgemm_weight_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightOutputQDQ(
@@ -288,7 +304,7 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -297,10 +313,12 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize inputs
-    x_q, x_scale, x_zero_point = _quantize_array(
+    x_q, x_scale, x_zero_point = _rtn_quantize(
         inputs,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -309,10 +327,12 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -321,6 +341,8 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Compute expected intermediate output
@@ -330,7 +352,7 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
     intermediate_output = np.matmul(x_dequantized, w_dequantized) + b_dequantized
 
     # Quantize output
-    out_q, out_scale, out_zero_point = _quantize_array(
+    out_q, out_scale, out_zero_point = _rtn_quantize(
         intermediate_output,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -339,6 +361,8 @@ def test_qgemm_weight_input_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightInputOutputQDQ(
@@ -387,7 +411,7 @@ def test_qgemm_weight_dynamic_input_qdq_outputs(rng, quant_type, is_symmetric):
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -396,10 +420,12 @@ def test_qgemm_weight_dynamic_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -408,6 +434,8 @@ def test_qgemm_weight_dynamic_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightDynamicInputQDQ(
@@ -450,7 +478,7 @@ def test_qgemm_weight_dynamic_output_qdq_outputs(rng, quant_type, is_symmetric):
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -459,10 +487,12 @@ def test_qgemm_weight_dynamic_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -471,6 +501,8 @@ def test_qgemm_weight_dynamic_output_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightDynamicOutputQDQ(
@@ -513,7 +545,7 @@ def test_qgemm_weight_dynamic_input_output_qdq_outputs(rng, quant_type, is_symme
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -522,10 +554,12 @@ def test_qgemm_weight_dynamic_input_output_qdq_outputs(rng, quant_type, is_symme
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -534,6 +568,8 @@ def test_qgemm_weight_dynamic_input_output_qdq_outputs(rng, quant_type, is_symme
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QGemmWeightDynamicInputOutputQDQ(
@@ -558,7 +594,7 @@ def test_qgemm_weights_only_grouped_outputs(rng, quant_type, is_symmetric, group
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
     bias = rng.uniform(low=-1.0, high=1.0, size=(64,)).astype(np.float32)
 
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -567,10 +603,12 @@ def test_qgemm_weights_only_grouped_outputs(rng, quant_type, is_symmetric, group
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize bias
-    b_q, b_scale, b_zero_point = _quantize_array(
+    b_q, b_scale, b_zero_point = _rtn_quantize(
         bias,
         quant_type=quant_type,
         is_symmetric=True,
@@ -579,6 +617,8 @@ def test_qgemm_weights_only_grouped_outputs(rng, quant_type, is_symmetric, group
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Run qfunction

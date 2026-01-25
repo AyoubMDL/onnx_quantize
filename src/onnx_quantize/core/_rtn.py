@@ -6,7 +6,7 @@ __all__ = [
     "_compute_qparams",
     "_compute_qparams_from_array",
     "_quantize_array_from_qparams",
-    "_quantize_array",
+    "_rtn_quantize",
     "_fake_quantize_array",
     "_dequantize_array",
     "_quantize_bias",
@@ -92,6 +92,8 @@ def _compute_min_max_mse(
     group_size,
     is_symmetric,
     reduce_range,
+    scale_dtype,
+    zp_dtype,
     maxshrink=0.20,
     patience=5,
     grid=100.0,
@@ -110,6 +112,8 @@ def _compute_min_max_mse(
         group_size (int): The group size for group quantization.
         is_symmetric (bool): Whether to use symmetric quantization.
         reduce_range (bool): Whether to use reduced range for quantization.
+        scale_dtype (np.dtype): The desired data type for the scale.
+        zp_dtype (np.dtype): The desired data type for the zero point.
         per_channel (bool): Whether to perform per-channel quantization or
             per-tensor quantization.
         maxshrink (float, optional): Maximum shrinkage factor as a fraction of the
@@ -149,6 +153,8 @@ def _compute_min_max_mse(
             quant_type=quant_type,
             is_symmetric=is_symmetric,
             reduce_range=reduce_range,
+            scale_dtype=scale_dtype,
+            zp_dtype=zp_dtype,
         )
         q = _fake_quantize_array(
             array,
@@ -181,7 +187,7 @@ def _compute_min_max_mse(
     return best_min_val, best_max_val
 
 
-def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range):
+def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range, scale_dtype, zp_dtype):
     """Computes the quantization parameters.
 
     Args:
@@ -190,6 +196,8 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range):
         quant_type (QuantType, optional): The quantization type.
         is_symmetric (bool): Whether to use symmetric quantization.
         reduce_range (bool): Whether to use reduced range for quantization.
+        scale_dtype (np.dtype): The desired data type for the scale.
+        zp_dtype (np.dtype): The desired data type for the zero point.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
@@ -204,9 +212,11 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range):
 
         # Compute zero point
         zero_point = qmin - (rmin / scale)
+
+        # TODO: In HQQ impl, rounding is optional
         zero_point = np.round(np.clip(zero_point, qmin, qmax))
 
-        return scale.astype(np.float32), np.asarray(zero_point, dtype=quant_type.np_dtype)
+        return scale.astype(scale_dtype), np.asarray(zero_point, dtype=zp_dtype)
 
     def _compute_qparams_symmetric(rmax, quant_type):
         qmin, qmax = quant_type.qrange(is_symmetric=True, reduce_range=reduce_range)
@@ -221,7 +231,7 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range):
         # Therefore, it is not always equal to 0, but it is the middle of the quantized range
         # e.g., for QInt8, the zero point is 0, but for QUInt8, it is 128
         zero = np.multiply(np.ones(rmax.shape), np.round((qmax + qmin) / 2.0))
-        return scale.astype(np.float32), np.asarray(zero, dtype=quant_type.np_dtype)
+        return scale.astype(scale_dtype), np.asarray(zero, dtype=zp_dtype)
 
     if is_symmetric:
         rmax = np.maximum(np.abs(rmin), np.abs(rmax))
@@ -230,7 +240,16 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range):
 
 
 def _compute_qparams_from_array(
-    array, quant_type, strategy, group_size, is_symmetric, reduce_range, clip_ratio, mse
+    array,
+    quant_type,
+    strategy,
+    group_size,
+    is_symmetric,
+    reduce_range,
+    clip_ratio,
+    mse,
+    scale_dtype,
+    zp_dtype,
 ):
     """Computes the quantization parameters from a tensor.
 
@@ -244,6 +263,8 @@ def _compute_qparams_from_array(
         reduce_range (bool): Whether to use reduced range for quantization.
         clip_ratio (float): percentile of clip.
         mse (bool): Whether to use MSE minimization to compute quantization parameters.
+        scale_dtype (np.dtype): The desired data type for the scale.
+        zp_dtype (np.dtype): The desired data type for the zero point.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
@@ -252,10 +273,19 @@ def _compute_qparams_from_array(
 
     if mse:
         rmin, rmax = _compute_min_max_mse(
-            array, quant_type, strategy, group_size, is_symmetric, reduce_range
+            array,
+            quant_type,
+            strategy,
+            group_size,
+            is_symmetric,
+            reduce_range,
+            scale_dtype,
+            zp_dtype,
         )
 
-    return _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range)
+    return _compute_qparams(
+        rmin, rmax, quant_type, is_symmetric, reduce_range, scale_dtype, zp_dtype
+    )
 
 
 def _quantize_array_from_qparams(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
@@ -268,24 +298,32 @@ def _quantize_array_from_qparams(array, scale, zero_point, quant_type, is_symmet
     return q_array.astype(quant_type.np_dtype)
 
 
-def _quantize_array(
-    array, quant_type, strategy, group_size, is_symmetric, reduce_range, clip_ratio, mse
-):
+def _rtn_quantize(
+    array: np.ndarray,
+    quant_type: QuantType,
+    strategy: QuantizationStrategy,
+    group_size: int,
+    is_symmetric: bool,
+    reduce_range: bool,
+    clip_ratio: float,
+    mse: bool,
+    scale_dtype: np.dtype,
+    zp_dtype: np.dtype,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Quantizes a tensor using asymmetric quantization.
 
     Args:
         array (np.ndarray): The floating-point tensor to quantize.
-        quant_type (QuantType, optional): The quantization type, either signed (QInt8)
-            or unsigned (QUInt8). Defaults to QuantType.QInt8.
+        quant_type (QuantType): The quantization type.
         strategy (QuantizationStrategy): The quantization strategy to use.
         group_size (int): The group size for group quantization.
-        is_symmetric (bool, optional): Whether to use symmetric quantization. Defaults to False.
-        reduce_range (bool, optional): Whether to use reduced range for quantization.
-            Defaults to False.
-        per_channel (bool): Whether to perform per-channel quantization. Defaults to False.
-        clip_ratio (float, optional): percentile of clip. Defaults to 1.0
-        mse (bool, optional): Whether to use MSE minimization to compute quantization parameters.
-            Defaults to False.
+        is_symmetric (bool): Whether to use symmetric quantization.
+        reduce_range (bool): Whether to use reduced range for quantization.
+        per_channel (bool): Whether to perform per-channel quantization.
+        clip_ratio (float): percentile of clip.
+        mse (bool): Whether to use MSE minimization to compute quantization parameters.
+        scale_dtype (np.dtype): The desired data type for the scale.
+        zp_dtype (np.dtype): The desired data type for the zero point.
 
     Returns:
         tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
@@ -300,6 +338,8 @@ def _quantize_array(
         reduce_range,
         clip_ratio=clip_ratio,
         mse=mse,
+        scale_dtype=scale_dtype,
+        zp_dtype=zp_dtype,
     )
     q_tensor = _quantize_array_from_qparams(
         preprocessed_array, scale, zero_point, quant_type, is_symmetric, reduce_range

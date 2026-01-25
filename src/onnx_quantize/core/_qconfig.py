@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from enum import Enum
 
 import numpy as np
@@ -7,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from onnx_quantize.core._calibration.base import CalibrationParams
 from onnx_quantize.core._dtypes import QuantType
+
+
+logger = logging.getLogger(__name__)
 
 
 class QuantizationStrategy(str, Enum):
@@ -38,7 +42,47 @@ class GPTQConfig(BaseModel):
     actorder: bool = False
 
 
-AlgorithmConfig = GPTQConfig | None
+class HqqConfig(BaseModel):
+    """HqqConfig is the configuration class handling all the HQQ quantization parameters.
+
+    Args:
+        lp_norm (float, optional): The Lp norm to use for optimization. Defaults to 0.7.
+        beta (float, optional): The beta parameter for the shrinkage operator. Defaults to 10.0.
+        kappa (float, optional): The kappa parameter for the optimization. Defaults to 1.01.
+        iters (int, optional): The number of iterations for optimization. Defaults to 20.
+        early_stop (bool, optional): Whether to use early stopping in optimization.
+            Defaults to True.
+    """
+
+    lp_norm: float = 0.7
+    beta: float = 1e1
+    kappa: float = 1.01
+    iters: int = 20
+    early_stop: bool = True
+
+    @staticmethod
+    def check_hqq_constraints(
+        dtype: QuantType, symmetric: bool, strategy: QuantizationStrategy, group_size: int
+    ) -> bool:
+        if dtype != QuantType.QUInt4:
+            raise ValueError(f"HQQ only supports uint4 weight type. Found: {np.dtype}")
+
+        if symmetric:
+            raise ValueError("HQQ only supports asymmetric quantization.")
+
+        # TODO: Maybe merge these with is_matmul_nbits_compatible
+        if strategy != QuantizationStrategy.GROUP:
+            # Because HQQ can only be used with MatMulNBits which expects groups
+            raise ValueError(f"HQQ only supports 'group' quantization strategy. Found: {strategy}")
+
+        if group_size != -1 and (group_size < 16 or (group_size & (group_size - 1)) != 0):
+            raise ValueError(
+                f"HQQ requires group_size to be greater than 16 and a power of 2. "
+                f"Found: {group_size}"
+            )
+
+
+AlgorithmConfig = GPTQConfig | HqqConfig | None
 
 
 class _BaseArgs(BaseModel):
@@ -52,6 +96,9 @@ class _BaseArgs(BaseModel):
     )
     strategy: QuantizationStrategy | str | None = None
     scale_dtype: np.dtype = Field(default=np.dtype(np.float32))
+
+    # Zero point field is set during validation
+    zp_dtype: np.dtype = Field(default=None, init=False)
     reduce_range: bool = False
 
     @field_validator("dtype", mode="before")
@@ -130,6 +177,10 @@ class _BaseArgs(BaseModel):
         if group_size is not None and group_size > 0 and strategy != QuantizationStrategy.GROUP:
             raise ValueError("group_size requires strategy to be set to 'group'.")
 
+        # Define zero point dtype
+        if self.zp_dtype is None:
+            self.zp_dtype = self.dtype.np_dtype
+
         # write back modified values
         self.strategy = strategy
         return self
@@ -155,6 +206,18 @@ class QWeightArgs(_BaseArgs):
         if not (0.0 < value <= 1.0):
             raise ValueError(f"clip_ratio must be in (0.0, 1.0], got {value}")
         return value
+
+    @model_validator(mode="after")
+    def validate_model_after(self: QWeightArgs) -> QWeightArgs:
+        if isinstance(self.algorithm, HqqConfig):
+            HqqConfig.check_hqq_constraints(
+                self.dtype, self.symmetric, self.strategy, self.group_size
+            )
+
+            # For Hqq, scale and zp dtypes are the same
+            self.zp_dtype = self.scale_dtype
+
+        return super().validate_model_after()
 
 
 class QActivationArgs(_BaseArgs):

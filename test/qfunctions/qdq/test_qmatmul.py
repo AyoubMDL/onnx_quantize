@@ -7,7 +7,7 @@ from onnx_quantize.core._rtn import (
     _dequantize_array,
     _post_process_array,
     _preprocess_array,
-    _quantize_array,
+    _rtn_quantize,
 )
 from onnx_quantize.qfunctions._qdq.qmatmul import (
     QMatMulWeightDynamicInputOutputQDQ,
@@ -50,7 +50,7 @@ def test_qmatmul_weights_only_qdq_outputs(rng, quant_type, is_symmetric, strateg
     inputs = rng.uniform(low=-1.0, high=1.0, size=(2, 32)).astype(np.float32)
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -59,6 +59,8 @@ def test_qmatmul_weights_only_qdq_outputs(rng, quant_type, is_symmetric, strateg
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Run qfunction
@@ -100,7 +102,7 @@ def test_qmatmul_weight_static_input_qdq_outputs(rng, quant_type, is_symmetric):
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -109,10 +111,12 @@ def test_qmatmul_weight_static_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize inputs
-    x_q, x_scale, x_zero_point = _quantize_array(
+    x_q, x_scale, x_zero_point = _rtn_quantize(
         inputs,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -121,6 +125,8 @@ def test_qmatmul_weight_static_input_qdq_outputs(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightStaticInputQDQ(inputs, w_q, w_scale, w_zero_point, x_scale, x_zero_point)
@@ -159,7 +165,7 @@ def test_qmatmul_weight_static_output_qdq_outputs(rng, quant_type, is_symmetric)
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -168,6 +174,8 @@ def test_qmatmul_weight_static_output_qdq_outputs(rng, quant_type, is_symmetric)
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Compute expected output to determine output scale
@@ -175,7 +183,7 @@ def test_qmatmul_weight_static_output_qdq_outputs(rng, quant_type, is_symmetric)
     intermediate_output = np.matmul(inputs, w_dequantized)
 
     # Quantize output
-    out_q, out_scale, out_zero_point = _quantize_array(
+    out_q, out_scale, out_zero_point = _rtn_quantize(
         intermediate_output,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -184,6 +192,8 @@ def test_qmatmul_weight_static_output_qdq_outputs(rng, quant_type, is_symmetric)
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightStaticOutputQDQ(
@@ -226,7 +236,7 @@ def test_qmatmul_weight_static_input_output_qdq_outputs(rng, quant_type, is_symm
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -235,10 +245,12 @@ def test_qmatmul_weight_static_input_output_qdq_outputs(rng, quant_type, is_symm
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize inputs
-    x_q, x_scale, x_zero_point = _quantize_array(
+    x_q, x_scale, x_zero_point = _rtn_quantize(
         inputs,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -247,6 +259,8 @@ def test_qmatmul_weight_static_input_output_qdq_outputs(rng, quant_type, is_symm
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Compute expected intermediate output
@@ -255,7 +269,7 @@ def test_qmatmul_weight_static_input_output_qdq_outputs(rng, quant_type, is_symm
     intermediate_output = np.matmul(x_dequantized, w_dequantized)
 
     # Quantize output
-    out_q, out_scale, out_zero_point = _quantize_array(
+    out_q, out_scale, out_zero_point = _rtn_quantize(
         intermediate_output,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -264,6 +278,8 @@ def test_qmatmul_weight_static_input_output_qdq_outputs(rng, quant_type, is_symm
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightStaticInputOutputQDQ(
@@ -300,7 +316,7 @@ def test_qmatmul_weight_dynamic_input_qdq_outputs(rng, quant_type, is_symmetric)
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -309,6 +325,8 @@ def test_qmatmul_weight_dynamic_input_qdq_outputs(rng, quant_type, is_symmetric)
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightDynamicInputQDQ(inputs, w_q, w_scale, w_zero_point)
@@ -348,7 +366,7 @@ def test_qmatmul_weight_dynamic_output_qdq_outputs(rng, quant_type, is_symmetric
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -357,6 +375,8 @@ def test_qmatmul_weight_dynamic_output_qdq_outputs(rng, quant_type, is_symmetric
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightDynamicOutputQDQ(inputs, w_q, w_scale, w_zero_point)
@@ -394,7 +414,7 @@ def test_qmatmul_weight_dynamic_input_output_qdq_outputs(rng, quant_type, is_sym
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -403,6 +423,8 @@ def test_qmatmul_weight_dynamic_input_output_qdq_outputs(rng, quant_type, is_sym
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     result = QMatMulWeightDynamicInputOutputQDQ(inputs, w_q, w_scale, w_zero_point)
@@ -424,7 +446,7 @@ def test_qmatmul_weights_only_grouped_outputs(rng, quant_type, is_symmetric, gro
     inputs = rng.uniform(low=-1.0, high=1.0, size=(2, 32)).astype(np.float32)
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -433,6 +455,8 @@ def test_qmatmul_weights_only_grouped_outputs(rng, quant_type, is_symmetric, gro
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Run qfunction
