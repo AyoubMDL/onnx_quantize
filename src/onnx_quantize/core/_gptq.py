@@ -22,16 +22,18 @@ logger = logging.getLogger(__name__)
 def _gptq(
     W: np.array,
     H: np.array,
-    quant_type=QuantType.QUInt8,
-    strategy=QuantizationStrategy.CHANNEL,
-    group_size=32,
-    is_symmetric=False,
-    reduce_range=False,
-    clip_ratio=1.0,
-    block_size=128,
-    percdamp=0.01,
-    actorder=False,
-    mse=False,
+    quant_type: QuantType,
+    strategy: QuantizationStrategy,
+    group_size: int,
+    is_symmetric: bool,
+    reduce_range: bool,
+    clip_ratio: float,
+    block_size: int,
+    percdamp: float,
+    actorder: bool,
+    mse: bool,
+    scale_dtype: np.dtype,
+    zp_dtype: np.dtype,
 ):
     used_strategy = strategy
     if strategy == QuantizationStrategy.GROUP:
@@ -54,6 +56,8 @@ def _gptq(
         clip_ratio=clip_ratio,
         reduce_range=reduce_range,
         mse=mse,
+        scale_dtype=scale_dtype,
+        zp_dtype=zp_dtype,
     )
     scale, zp = np.squeeze(scale), np.squeeze(zp)
 
@@ -120,6 +124,8 @@ def _gptq(
                         reduce_range=reduce_range,
                         clip_ratio=clip_ratio,
                         mse=mse,
+                        scale_dtype=scale_dtype,
+                        zp_dtype=zp_dtype,
                     )
                     scale, zp = np.squeeze(scale), np.squeeze(zp)
 
@@ -166,6 +172,8 @@ def _gptq(
         reduce_range,
         clip_ratio=clip_ratio,
         mse=mse,
+        scale_dtype=scale_dtype,
+        zp_dtype=zp_dtype,
     )
 
     # TODO: this line is also done for rtn quantization
@@ -211,6 +219,8 @@ def _gptq_quantize(
     percdamp=0.01,
     actorder=False,
     mse=False,
+    scale_dtype=np.float32,
+    zp_dtype=np.int8,
 ):
     """Quant the weight with GPTQ method.
 
@@ -229,6 +239,8 @@ def _gptq_quantize(
         percdamp (float, optional): percent of the average Hessian diagonal to use for dampening.
         actorder (bool, optional): whether rearrange Hessian matrix considering the diag's value.
         mse (bool, optional): whether get scale and zero point with mse error.
+        scale_dtype (np.dtype, optional): data type for scale. Default is np.float32.
+        zp_dtype (np.dtype, optional): data type for zero point. Default is np.int8.
 
     Returns:
         (np.ndarray, np.ndarray, np.ndarray): quantized weight, scale, zero point.
@@ -251,6 +263,8 @@ def _gptq_quantize(
         percdamp=percdamp,
         actorder=actorder,
         mse=mse,
+        scale_dtype=scale_dtype,
+        zp_dtype=zp_dtype,
     )
 
     return w_q, w_scale, w_zero_point

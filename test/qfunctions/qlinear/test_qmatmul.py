@@ -3,7 +3,7 @@ import onnx
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core._rtn import _dequantize_array, _quantize_array
+from onnx_quantize.core._rtn import _dequantize_array, _rtn_quantize
 from onnx_quantize.qfunctions._qlinear.qmatmul import QLinearMatMul
 
 
@@ -41,7 +41,7 @@ def test_qlinear_matmul_weight_input_output(rng, quant_type, is_symmetric):
     weights = rng.uniform(low=-1.0, high=1.0, size=(32, 64)).astype(np.float32)
 
     # Quantize weights
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         weights,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -50,10 +50,12 @@ def test_qlinear_matmul_weight_input_output(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Quantize inputs
-    x_q, x_scale, x_zero_point = _quantize_array(
+    x_q, x_scale, x_zero_point = _rtn_quantize(
         inputs,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -62,6 +64,8 @@ def test_qlinear_matmul_weight_input_output(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
 
     # Compute expected intermediate output
@@ -70,7 +74,7 @@ def test_qlinear_matmul_weight_input_output(rng, quant_type, is_symmetric):
     intermediate_output = np.matmul(x_dequantized, w_dequantized)
 
     # Quantize output
-    out_q, out_scale, out_zero_point = _quantize_array(
+    out_q, out_scale, out_zero_point = _rtn_quantize(
         intermediate_output,
         quant_type=quant_type,
         is_symmetric=is_symmetric,
@@ -79,6 +83,8 @@ def test_qlinear_matmul_weight_input_output(rng, quant_type, is_symmetric):
         reduce_range=False,
         clip_ratio=1.0,
         mse=False,
+        scale_dtype=np.float32,
+        zp_dtype=quant_type.np_dtype,
     )
     expected_output = _dequantize_array(out_q, out_scale, out_zero_point)
 

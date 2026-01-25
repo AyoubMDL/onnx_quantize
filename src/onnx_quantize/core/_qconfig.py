@@ -52,6 +52,9 @@ class _BaseArgs(BaseModel):
     )
     strategy: QuantizationStrategy | str | None = None
     scale_dtype: np.dtype = Field(default=np.dtype(np.float32))
+
+    # Zero point field is set during validation
+    zp_dtype: np.dtype = Field(default=None, init=False)
     reduce_range: bool = False
 
     @field_validator("dtype", mode="before")
@@ -129,6 +132,10 @@ class _BaseArgs(BaseModel):
 
         if group_size is not None and group_size > 0 and strategy != QuantizationStrategy.GROUP:
             raise ValueError("group_size requires strategy to be set to 'group'.")
+
+        # Define zero point dtype
+        if self.zp_dtype is None:
+            self.zp_dtype = self.dtype.np_dtype
 
         # write back modified values
         self.strategy = strategy

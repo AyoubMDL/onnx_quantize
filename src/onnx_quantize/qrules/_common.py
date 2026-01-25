@@ -5,8 +5,7 @@ import onnx_ir as ir
 
 from onnx_quantize.core._dtypes import QuantType
 from onnx_quantize.core._gptq import _gptq_quantize
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig, QuantizationStrategy
-from onnx_quantize.core._rtn import _quantize_array
+from onnx_quantize.core._rtn import _rtn_quantize
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +44,8 @@ def _quantize_weights_gptq(w: ir.Value, inputs: np.ndarray, qconfig: QConfig):
         group_size=qconfig.weights.group_size,
         actorder=qconfig.weights.algorithm.actorder,
         mse=qconfig.weights.mse,
+        scale_dtype=qconfig.weights.scale_dtype,
+        zp_dtype=qconfig.weights.zp_dtype,
     )
 
     # Cast to scale dtype
@@ -54,7 +55,7 @@ def _quantize_weights_gptq(w: ir.Value, inputs: np.ndarray, qconfig: QConfig):
 
 
 def _quantize_weights_rtn(w: ir.Value, qconfig: QConfig):
-    w_q, w_scale, w_zero_point = _quantize_array(
+    w_q, w_scale, w_zero_point = _rtn_quantize(
         w.const_value.numpy(),
         qconfig.weights.dtype,
         strategy=qconfig.weights.strategy,
@@ -63,10 +64,11 @@ def _quantize_weights_rtn(w: ir.Value, qconfig: QConfig):
         reduce_range=qconfig.weights.reduce_range,
         clip_ratio=qconfig.weights.clip_ratio,
         mse=qconfig.weights.mse,
+        scale_dtype=qconfig.weights.scale_dtype,
+        zp_dtype=qconfig.weights.zp_dtype,
     )
 
-    # Cast to scale dtype
-    w_scale = w_scale.astype(qconfig.weights.scale_dtype)
+    return w_q, w_scale, w_zero_point
 
     return w_q, w_scale, w_zero_point
 
