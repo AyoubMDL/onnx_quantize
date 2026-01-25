@@ -3,11 +3,11 @@ import onnx
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core._rtn import (
+from onnx_quantize.core._algorithms import _rtn_quantize
+from onnx_quantize.core._algorithms.utils import (
     _dequantize_array,
     _post_process_array,
     _preprocess_array,
-    _rtn_quantize,
 )
 from onnx_quantize.qfunctions._qdq.qmatmul import (
     QMatMulWeightDynamicInputOutputQDQ,

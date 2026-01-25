@@ -1,7 +1,7 @@
 import onnx_ir as ir
 
+from onnx_quantize.core._algorithms.rtn import _quantize_bias as _quantize_bias_rtn
 from onnx_quantize.core._qconfig import QConfig, QFormat
-from onnx_quantize.core._rtn import _quantize_bias as _quantize_bias_rtn
 from onnx_quantize.qfunctions import QUANT_OPSET
 from onnx_quantize.qrules._common import quantize_weights
 from onnx_quantize.qrules._qlinear.matmul_to_qmatmul import MatMulToQLinearMatMul

@@ -5,14 +5,13 @@ import onnx_ir as ir
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core._rtn import (
+from onnx_quantize.core._algorithms.rtn import _quantize_bias, _rtn_quantize
+from onnx_quantize.core._algorithms.utils import (
     _compute_min_max,
     _compute_min_max_mse,
     _compute_qparams_from_array,
     _dequantize_array,
     _preprocess_array,
-    _quantize_bias,
-    _rtn_quantize,
 )
 from onnx_quantize.qrules._common import _resolve_group_size
 

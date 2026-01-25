@@ -2,12 +2,10 @@ __all__ = ["_hqq_quantize"]
 
 import numpy as np
 
+from onnx_quantize.core._algorithms.rtn import _rtn_quantize
+from onnx_quantize.core._algorithms.utils import _preprocess_array
 from onnx_quantize.core._dtypes import QuantType
 from onnx_quantize.core._qconfig import QuantizationStrategy
-from onnx_quantize.core._rtn import (
-    _preprocess_array,
-    _rtn_quantize,
-)
 
 
 def _relu(x: np.ndarray) -> np.ndarray:

@@ -3,11 +3,9 @@ import logging
 import numpy as np
 import onnx_ir as ir
 
+from onnx_quantize.core._algorithms import _gptq_quantize, _hqq_quantize, _rtn_quantize
 from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._gptq import _gptq_quantize
-from onnx_quantize.core._hqq import _hqq_quantize
 from onnx_quantize.core._qconfig import GPTQConfig, HqqConfig, QConfig, QuantizationStrategy
-from onnx_quantize.core._rtn import _rtn_quantize
 
 
 logger = logging.getLogger(__name__)

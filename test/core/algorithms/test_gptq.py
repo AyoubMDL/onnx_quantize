@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core._gptq import _gptq_quantize
+from onnx_quantize.core._algorithms import _gptq_quantize
 
 
 @pytest.fixture
