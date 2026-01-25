@@ -1,21 +1,5 @@
-__all__ = [
-    "_preprocess_array",
-    "_post_process_array",
-    "_compute_min_max",
-    "_compute_min_max_mse",
-    "_compute_qparams",
-    "_compute_qparams_from_array",
-    "_quantize_array_from_qparams",
-    "_rtn_quantize",
-    "_fake_quantize_array",
-    "_dequantize_array",
-    "_quantize_bias",
-]
-
-
 import numpy as np
 
-from onnx_quantize.core._dtypes import QuantType
 from onnx_quantize.core._qconfig import QuantizationStrategy
 
 
@@ -83,6 +67,74 @@ def _compute_min_max(array, strategy, group_size=-1, clip_ratio=1.0):
     max_val = np.maximum(max_val, 0)
 
     return np.array(min_val), np.array(max_val)
+
+
+def _quantize_array_from_qparams(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
+    array_scaled = array / scale
+    shifted_tensor = np.round(array_scaled).astype(np.int32) + zero_point
+
+    qmin, qmax = quant_type.qrange(is_symmetric, reduce_range)
+    q_array = np.clip(shifted_tensor, qmin, qmax)
+
+    return q_array.astype(quant_type.np_dtype)
+
+
+def _fake_quantize_array(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
+    """Simulates quantization and dequantization of a tensor.
+
+    Args:
+        array (np.ndarray): The floating-point tensor to be quantized and dequantized.
+        scale (np.ndarray): The scaling factor.
+        zero_point (np.ndarray): The zero point.
+        quant_type (QuantType): The quantization data type.
+        is_symmetric (bool): Whether to use symmetric quantization.
+        reduce_range (bool): Whether to use reduced range for quantization.
+
+    Returns:
+        np.ndarray: The fake quantized tensor.
+    """
+    q_tensor = _quantize_array_from_qparams(
+        array, scale, zero_point, quant_type, is_symmetric, reduce_range
+    )
+    return _dequantize_array(q_tensor, scale, zero_point)
+
+
+def _dequantize_array(
+    q_array, scale, zero_point, *, preprocess=False, strategy=None, group_size=-1
+):
+    """Dequantizes a tensor.
+
+    Args:
+        q_array (np.ndarray): The quantized tensor to dequantize.
+        scale (np.ndarray): The scaling factor.
+        zero_point (np.ndarray): The zero point.
+        preprocess (bool, optional): Whether to preprocess the array before dequantization.
+            Defaults to False.
+        strategy (QuantizationStrategy, optional): The quantization strategy used
+            during preprocessing. Required if preprocess is True.
+        group_size (int, optional): The group size for
+
+    Returns:
+        np.ndarray: The dequantized tensor
+    """
+    preprocessed_array = q_array
+    if preprocess:
+        assert strategy is not None, "strategy must be provided if preprocess is True"
+        preprocessed_array = _preprocess_array(q_array, strategy, group_size)
+
+        # Expand scale and zp dims (for tensor strategy, they are scalars,
+        # for group, they already have the correct shape)
+        if strategy == QuantizationStrategy.CHANNEL:
+            scale, zero_point = np.expand_dims(scale, axis=1), np.expand_dims(zero_point, axis=1)
+
+    dequantized_array = (
+        preprocessed_array.astype(np.float32) - zero_point.astype(np.float32)
+    ) * scale
+
+    if preprocess:
+        dequantized_array = _post_process_array(dequantized_array, q_array, strategy, group_size)
+
+    return dequantized_array
 
 
 def _compute_min_max_mse(
@@ -286,158 +338,3 @@ def _compute_qparams_from_array(
     return _compute_qparams(
         rmin, rmax, quant_type, is_symmetric, reduce_range, scale_dtype, zp_dtype
     )
-
-
-def _quantize_array_from_qparams(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
-    array_scaled = array / scale
-    shifted_tensor = np.round(array_scaled).astype(np.int32) + zero_point
-
-    qmin, qmax = quant_type.qrange(is_symmetric, reduce_range)
-    q_array = np.clip(shifted_tensor, qmin, qmax)
-
-    return q_array.astype(quant_type.np_dtype)
-
-
-def _rtn_quantize(
-    array: np.ndarray,
-    quant_type: QuantType,
-    strategy: QuantizationStrategy,
-    group_size: int,
-    is_symmetric: bool,
-    reduce_range: bool,
-    clip_ratio: float,
-    mse: bool,
-    scale_dtype: np.dtype,
-    zp_dtype: np.dtype,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Quantizes a tensor using asymmetric quantization.
-
-    Args:
-        array (np.ndarray): The floating-point tensor to quantize.
-        quant_type (QuantType): The quantization type.
-        strategy (QuantizationStrategy): The quantization strategy to use.
-        group_size (int): The group size for group quantization.
-        is_symmetric (bool): Whether to use symmetric quantization.
-        reduce_range (bool): Whether to use reduced range for quantization.
-        per_channel (bool): Whether to perform per-channel quantization.
-        clip_ratio (float): percentile of clip.
-        mse (bool): Whether to use MSE minimization to compute quantization parameters.
-        scale_dtype (np.dtype): The desired data type for the scale.
-        zp_dtype (np.dtype): The desired data type for the zero point.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
-    """
-    preprocessed_array = _preprocess_array(array, strategy, group_size)
-    scale, zero_point = _compute_qparams_from_array(
-        preprocessed_array,
-        quant_type,
-        strategy,
-        group_size,
-        is_symmetric,
-        reduce_range,
-        clip_ratio=clip_ratio,
-        mse=mse,
-        scale_dtype=scale_dtype,
-        zp_dtype=zp_dtype,
-    )
-    q_tensor = _quantize_array_from_qparams(
-        preprocessed_array, scale, zero_point, quant_type, is_symmetric, reduce_range
-    )
-
-    # Squeeze scale and zero_point to remove unnecessary dimensions (ort constraint)
-    # For group quantization, extra dimension is needed
-    if strategy in {QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL}:
-        scale, zero_point = np.squeeze(scale), np.squeeze(zero_point)
-
-    # Reshape to original
-    post_processed_qarray = _post_process_array(q_tensor, array, strategy, group_size)
-
-    return post_processed_qarray, scale, zero_point
-
-
-def _fake_quantize_array(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
-    """Simulates quantization and dequantization of a tensor.
-
-    Args:
-        array (np.ndarray): The floating-point tensor to be quantized and dequantized.
-        scale (np.ndarray): The scaling factor.
-        zero_point (np.ndarray): The zero point.
-        quant_type (QuantType): The quantization data type.
-        is_symmetric (bool): Whether to use symmetric quantization.
-        reduce_range (bool): Whether to use reduced range for quantization.
-
-    Returns:
-        np.ndarray: The fake quantized tensor.
-    """
-    q_tensor = _quantize_array_from_qparams(
-        array, scale, zero_point, quant_type, is_symmetric, reduce_range
-    )
-    return _dequantize_array(q_tensor, scale, zero_point)
-
-
-def _dequantize_array(
-    q_array, scale, zero_point, *, preprocess=False, strategy=None, group_size=-1
-):
-    """Dequantizes a tensor.
-
-    Args:
-        q_array (np.ndarray): The quantized tensor to dequantize.
-        scale (np.ndarray): The scaling factor.
-        zero_point (np.ndarray): The zero point.
-        preprocess (bool, optional): Whether to preprocess the array before dequantization.
-            Defaults to False.
-        strategy (QuantizationStrategy, optional): The quantization strategy used
-            during preprocessing. Required if preprocess is True.
-        group_size (int, optional): The group size for
-
-    Returns:
-        np.ndarray: The dequantized tensor
-    """
-    preprocessed_array = q_array
-    if preprocess:
-        assert strategy is not None, "strategy must be provided if preprocess is True"
-        preprocessed_array = _preprocess_array(q_array, strategy, group_size)
-
-        # Expand scale and zp dims (for tensor strategy, they are scalars,
-        # for group, they already have the correct shape)
-        if strategy == QuantizationStrategy.CHANNEL:
-            scale, zero_point = np.expand_dims(scale, axis=1), np.expand_dims(zero_point, axis=1)
-
-    dequantized_array = (
-        preprocessed_array.astype(np.float32) - zero_point.astype(np.float32)
-    ) * scale
-
-    if preprocess:
-        dequantized_array = _post_process_array(dequantized_array, q_array, strategy, group_size)
-
-    return dequantized_array
-
-
-def _quantize_bias(bias, input_scale, weight_scale):
-    """Linear quantization for single bias tensor quantized_bias = fp_bias / bias_scale.
-
-    Args:
-        bias (np.ndarray): bias weight to be quantized
-        weight_scale: [float or torch.FloatTensor] weight scale tensor
-        input_scale: [float] input scale
-
-    Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: The quantized tensor, scale, and zero-point.
-    """
-    assert bias.ndim == 1
-    assert bias.dtype == np.float32
-    assert np.size(input_scale) == 1
-    assert weight_scale.dtype == np.float32
-    assert weight_scale.size == 1 or bias.size == weight_scale.size
-
-    bias_scale = weight_scale * input_scale
-    qbias = _quantize_array_from_qparams(
-        bias,
-        scale=bias_scale,
-        zero_point=0,
-        quant_type=QuantType.QInt32,
-        is_symmetric=False,
-        reduce_range=False,
-    )
-    return qbias, bias_scale, 0

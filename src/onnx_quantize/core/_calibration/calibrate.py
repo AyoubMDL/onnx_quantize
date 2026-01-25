@@ -8,13 +8,13 @@ import numpy as np
 import onnx_ir as ir
 import onnxruntime
 
+from onnx_quantize.core._algorithms.utils import _compute_qparams
 from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
 from onnx_quantize.core._qconfig import (
     GPTQConfig,
     QActivationArgs,
     QConfig,
 )
-from onnx_quantize.core._rtn import _compute_qparams
 
 
 logger = logging.getLogger(__name__)

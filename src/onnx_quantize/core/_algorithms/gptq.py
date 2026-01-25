@@ -6,14 +6,14 @@ import math
 
 import numpy as np
 
-from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._qconfig import QuantizationStrategy
-from onnx_quantize.core._rtn import (
+from onnx_quantize.core._algorithms.utils import (
     _compute_qparams_from_array,
     _dequantize_array,
     _preprocess_array,
     _quantize_array_from_qparams,
 )
+from onnx_quantize.core._dtypes import QuantType
+from onnx_quantize.core._qconfig import QuantizationStrategy
 
 
 logger = logging.getLogger(__name__)

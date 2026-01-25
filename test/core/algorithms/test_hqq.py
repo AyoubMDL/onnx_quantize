@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from onnx_quantize import QuantizationStrategy, QuantType
-from onnx_quantize.core._hqq import _hqq_quantize
-from onnx_quantize.core._rtn import _dequantize_array
+from onnx_quantize.core._algorithms import _hqq_quantize
+from onnx_quantize.core._algorithms.utils import _dequantize_array
 
 
 @pytest.mark.parametrize("group_size", [16, 32, 64])
