@@ -3,7 +3,7 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize import GPTQConfig, QuantType, quantize
+from onnx_quantize import GPTQConfig, HqqConfig, QuantType, quantize
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
 
@@ -339,6 +339,84 @@ def test_quantize_matmul_nbits_compatibility(rng, model_fn, dtype, algorithm):
 
     original_output, quantized_output = onnx_forward_on_models(
         model_proto, qmodel_proto, samples={"X": _truncated_normal(rng, (2, 32))}
+    )
+
+    np.testing.assert_allclose(original_output, quantized_output, atol=1e-1)
+
+
+@pytest.mark.parametrize("group_size", [16, 32, 64])
+@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model, _get_matmul_add_model])
+def test_quantize_weights_only_hqq(rng, model_fn, group_size):
+    model = model_fn(rng)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy="group",
+            group_size=group_size,
+            symmetric=False,
+            algorithm=HqqConfig(),
+        ),
+    )
+
+    _test_quantize(rng, model, qconfig)
+
+
+@pytest.mark.parametrize(
+    "hqq_params",
+    [
+        {"lp_norm": 0.7, "beta": 10.0, "iters": 20},
+        {"lp_norm": 0.5, "beta": 5.0, "iters": 10, "early_stop": False},
+        {"lp_norm": 1.0, "beta": 15.0, "kappa": 1.05, "iters": 15},
+    ],
+)
+def test_quantize_weights_hqq_custom_params(rng, hqq_params):
+    model = _get_matmul_model(rng)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy="group",
+            group_size=32,
+            symmetric=False,
+            algorithm=HqqConfig(**hqq_params),
+        ),
+    )
+
+    _test_quantize(rng, model, qconfig)
+
+
+@pytest.mark.parametrize("group_size", [16, 32, 64])
+@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model, _get_matmul_add_model])
+def test_quantize_hqq_matmul_nbits_compatibility(rng, model_fn, group_size):
+    model = model_fn(rng)
+    calibration_data = _truncated_normal(rng, (2, 32))
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy="group",
+            group_size=group_size,
+            symmetric=False,
+            algorithm=HqqConfig(),
+        ),
+        calibration_data=calibration_data,
+    )
+
+    qmodel = quantize(model, qconfig)
+    qmodel_proto = ir.to_proto(qmodel) if isinstance(qmodel, ir.Model) else qmodel
+    model_proto = ir.to_proto(model) if isinstance(model, ir.Model) else model
+
+    # Check that all nodes are MatMulNBits
+    assert all(node.op_type == "MatMulNBits" for node in qmodel.graph.node)
+
+    # Check all nodes are quantized
+    assert all(
+        node.domain in {MS_OPSET.domain, QUANT_OPSET.domain} for node in qmodel_proto.graph.node
+    )
+
+    original_output, quantized_output = onnx_forward_on_models(
+        model_proto, qmodel_proto, samples={"X": calibration_data}
     )
 
     np.testing.assert_allclose(original_output, quantized_output, atol=1e-1)

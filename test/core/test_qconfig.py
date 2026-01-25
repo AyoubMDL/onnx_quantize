@@ -4,6 +4,7 @@ import pytest
 from onnx_quantize import (
     CalibrationMethod,
     GPTQConfig,
+    HqqConfig,
     QActivationArgs,
     QConfig,
     QFormat,
@@ -264,6 +265,108 @@ class TestQWeightArgs:
         assert isinstance(args.algorithm, GPTQConfig)
         assert args.strategy == QuantizationStrategy.GROUP
         assert args.group_size == 128
+
+    def test_qweight_args_hqq_valid_config(self):
+        args = QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy=QuantizationStrategy.GROUP,
+            group_size=32,
+            symmetric=False,
+            algorithm=HqqConfig(),
+        )
+        assert isinstance(args.algorithm, HqqConfig)
+        assert args.dtype == QuantType.QUInt4
+        assert args.strategy == QuantizationStrategy.GROUP
+        assert args.symmetric is False
+        assert args.group_size == 32
+        assert args.zp_dtype == args.scale_dtype
+
+    @pytest.mark.parametrize("quant_type", [QuantType.QInt8, QuantType.QUInt8])
+    def test_qweight_args_hqq_invalid_dtype(self, quant_type):
+        with pytest.raises(ValueError, match="HQQ only supports uint4 weight type"):
+            QWeightArgs(
+                dtype=quant_type,
+                strategy=QuantizationStrategy.GROUP,
+                group_size=32,
+                algorithm=HqqConfig(),
+            )
+
+    def test_qweight_args_hqq_invalid_symmetric(self):
+        with pytest.raises(ValueError, match="HQQ only supports asymmetric quantization"):
+            QWeightArgs(
+                dtype=QuantType.QUInt4,
+                strategy=QuantizationStrategy.GROUP,
+                group_size=32,
+                symmetric=True,
+                algorithm=HqqConfig(),
+            )
+
+    @pytest.mark.parametrize("strategy", ["tensor", "channel"])
+    def test_qweight_args_hqq_invalid_strategy(self, strategy):
+        with pytest.raises(ValueError, match="HQQ only supports 'group' quantization strategy"):
+            QWeightArgs(
+                dtype=QuantType.QUInt4,
+                strategy=strategy,
+                algorithm=HqqConfig(),
+            )
+
+    def test_qweight_args_hqq_invalid_group_size(self):
+        # Group size less than 16
+        with pytest.raises(ValueError, match="HQQ requires group_size to be greater than 16"):
+            QWeightArgs(
+                dtype=QuantType.QUInt4,
+                strategy=QuantizationStrategy.GROUP,
+                group_size=8,
+                algorithm=HqqConfig(),
+            )
+
+        # Group size not power of 2
+        with pytest.raises(ValueError, match="HQQ requires group_size to be greater than 16"):
+            QWeightArgs(
+                dtype=QuantType.QUInt4,
+                strategy=QuantizationStrategy.GROUP,
+                group_size=48,
+                algorithm=HqqConfig(),
+            )
+
+    def test_qweight_args_hqq_valid_group_sizes(self):
+        for group_size in [16, 32, 64, 128, 256]:
+            args = QWeightArgs(
+                dtype=QuantType.QUInt4,
+                strategy=QuantizationStrategy.GROUP,
+                group_size=group_size,
+                symmetric=False,
+                algorithm=HqqConfig(),
+            )
+            assert args.group_size == group_size
+
+    def test_qweight_args_hqq_scale_zp_same_dtype(self):
+        # Even if we provide different dtypes, it should be corrected
+        args = QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy=QuantizationStrategy.GROUP,
+            group_size=32,
+            symmetric=False,
+            algorithm=HqqConfig(),
+            scale_dtype=np.float32,
+        )
+        # zp_dtype should be set to match scale_dtype
+        assert args.scale_dtype == args.zp_dtype
+
+    def test_qweight_args_hqq_custom_parameters(self):
+        args = QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy=QuantizationStrategy.GROUP,
+            group_size=64,
+            symmetric=False,
+            algorithm=HqqConfig(lp_norm=0.5, beta=5.0, kappa=1.05, iters=10, early_stop=False),
+        )
+        assert isinstance(args.algorithm, HqqConfig)
+        assert args.algorithm.lp_norm == 0.5
+        assert args.algorithm.beta == 5.0
+        assert args.algorithm.kappa == 1.05
+        assert args.algorithm.iters == 10
+        assert args.algorithm.early_stop is False
 
     def test_qweight_args_invalid_scale_dtype(self):
         with pytest.raises(ValueError, match="Only float32 scale dtype is currently supported."):

@@ -4,7 +4,7 @@ import onnx_ir as ir
 import onnxscript
 import pytest
 
-from onnx_quantize import GPTQConfig, QuantType
+from onnx_quantize import GPTQConfig, HqqConfig, QuantType
 from onnx_quantize.core._calibration.calibrate import calibrate_model
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.opset import op
@@ -93,6 +93,37 @@ def test_matmul_to_qmatmul_weights_only_matmul_nbits(rng, group_size, algo):
 
     if isinstance(algo, GPTQConfig):
         calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+
+    _add_qconfig_to_nodes(model, qconfig)
+    model = onnxscript.rewriter.rewrite(model, matmul_to_qdq_matmul_rules)
+
+    for node in model.graph:
+        assert node.op_type == "MatMulNBits"
+
+    # Check model
+    proto = ir.to_proto(model)
+    onnx.checker.check_model(proto)
+
+    # Check that inference runs without error
+    samples = rng.uniform(size=(1, 32)).astype(np.float32)
+    onnx_forward_on_models(proto, samples={"X": samples})
+
+
+@pytest.mark.parametrize("group_size", [16, 32, 64])
+def test_matmul_to_qmatmul_weights_only_hqq(rng, group_size):
+    """Test HQQ quantization for MatMul to QMatMul transformation."""
+    model = _get_test_model(rng)
+
+    # Create QConfig with HQQ
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt4,
+            strategy="group",
+            group_size=group_size,
+            symmetric=False,
+            algorithm=HqqConfig(),
+        )
+    )
 
     _add_qconfig_to_nodes(model, qconfig)
     model = onnxscript.rewriter.rewrite(model, matmul_to_qdq_matmul_rules)
