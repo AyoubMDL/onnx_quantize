@@ -9,6 +9,46 @@ from transformers import AutoTokenizer
 from onnx_quantize import HqqConfig, QConfig, QuantType, QWeightArgs, quantize
 
 
+@pytest.fixture(scope="module")
+def bert_dataset():
+    model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    dataset = load_dataset("glue", "sst2", split="validation[:100]")
+
+    def preprocess(examples):
+        return tokenizer(
+            examples["sentence"],
+            padding=True,
+            truncation=True,
+            max_length=128,
+        )
+
+    dataset = dataset.map(preprocess, batched=True)
+    dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+    return dataset
+
+
+@pytest.fixture(scope="module")
+def bert_onnx_dir(tmp_path_factory):
+    model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+    path = tmp_path_factory.mktemp("bert_onnx")
+
+    onnx_model = ORTModelForSequenceClassification.from_pretrained(
+        model_name,
+        export=True,
+        provider="CPUExecutionProvider",
+    )
+    onnx_model.save_pretrained(path)
+
+    return path
+
+
+@pytest.fixture(scope="module")
+def bert_model(bert_onnx_dir):
+    """Raw ONNX model for quantization."""
+    return onnx.load(bert_onnx_dir / "model.onnx")
+
+
 @pytest.mark.parametrize(
     "quant_type, strategy, group_size, algorithm, expected_accuracy",
     [
@@ -18,17 +58,15 @@ from onnx_quantize import HqqConfig, QConfig, QuantType, QWeightArgs, quantize
     ],
 )
 def test_quantize_bert_weights_only(
-    tmp_path, quant_type, strategy, group_size, algorithm, expected_accuracy
+    bert_dataset,
+    bert_model,
+    bert_onnx_dir,
+    quant_type,
+    strategy,
+    group_size,
+    algorithm,
+    expected_accuracy,
 ):
-    model_name = "distilbert-base-uncased-finetuned-sst-2-english"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    onnx_model = ORTModelForSequenceClassification.from_pretrained(
-        model_name, export=True, provider="CPUExecutionProvider"
-    )
-    onnx_model.save_pretrained(tmp_path)
-    model = onnx.load(tmp_path / "model.onnx")
-
     qconfig = QConfig(
         weights=QWeightArgs(
             dtype=quant_type,
@@ -39,29 +77,26 @@ def test_quantize_bert_weights_only(
         ),
     )
 
-    qmodel = quantize(model, qconfig)
-    onnx.save(qmodel, tmp_path / "quantized_model.onnx")
+    # Quantize
+    qmodel = quantize(bert_model, qconfig)
+    onnx.save(qmodel, bert_onnx_dir / "quantized_model.onnx")
 
+    # Reload with full HF context
     onnx_model = ORTModelForSequenceClassification.from_pretrained(
-        tmp_path,
+        bert_onnx_dir,
         file_name="quantized_model.onnx",
         provider="CPUExecutionProvider",
     )
 
-    dataset = load_dataset("glue", "sst2", split="validation[:100]")
-
-    def preprocess(examples):
-        return tokenizer(examples["sentence"], padding=True, truncation=True, max_length=128)
-
-    dataset = dataset.map(preprocess, batched=True)
-    dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
-
     # Evaluate
     correct = 0
-    for batch in tqdm(torch.utils.data.DataLoader(dataset, batch_size=8)):
-        outputs = onnx_model(**{k: v for k, v in batch.items() if k != "label"})
+    for batch in tqdm(torch.utils.data.DataLoader(bert_dataset, batch_size=8)):
+        outputs = onnx_model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+        )
         preds = outputs.logits.argmax(dim=-1)
         correct += (preds == batch["label"]).sum().item()
 
-    # float has 0.94
-    assert correct / len(dataset) == expected_accuracy
+    # float has ~0.94 accuracy
+    assert correct / len(bert_dataset) == expected_accuracy
