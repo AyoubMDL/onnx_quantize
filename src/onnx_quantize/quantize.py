@@ -7,38 +7,14 @@ import onnx_ir as ir
 import onnx_ir.passes.common as ir_passes
 import onnxscript
 
-from onnx_quantize import OP_TYPES_TO_QUANTIZE
-from onnx_quantize.core._calibration.calibrate import calibrate_model, get_target_nodes
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig
+from onnx_quantize.core._qconfig import QConfig
 from onnx_quantize.opset import op
-from onnx_quantize.pre_rules import pre_rules
+from onnx_quantize.pre_passes import apply_pre_passes
 from onnx_quantize.qfunctions import get_qfunctions
 from onnx_quantize.qrules import get_qrules
 
 
 logger = logging.getLogger(__name__)
-
-
-def _add_qconfig_to_nodes(ir_model: ir.Model, qconfig: QConfig) -> None:
-    nodes = get_target_nodes(ir_model, OP_TYPES_TO_QUANTIZE)
-
-    for node in ir_model.graph:
-        if node in nodes:
-            # Store the qconfig in the node metadata
-            node.meta["qconfig"] = qconfig.model_dump()
-
-
-def _needs_calibration(qconfig: QConfig) -> bool:
-    if qconfig.input_activations and qconfig.input_activations.is_static:
-        return True
-
-    if qconfig.output_activations and qconfig.output_activations.is_static:
-        return True
-
-    if qconfig.weights and isinstance(qconfig.weights.algorithm, GPTQConfig):
-        return True
-
-    return False
 
 
 def _no_quantization_needed(qconfig: QConfig) -> bool:
@@ -78,14 +54,7 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
 
     # Run pre rules quant
     logger.info("Applying pre-quantization rules...")
-    model = pre_rules(model).model
-
-    # Calibrate the model to compute quantization parameters
-    if _needs_calibration(qconfig):
-        logger.info("Calibrating the model...")
-        calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
-
-    _add_qconfig_to_nodes(model, qconfig)
+    model = apply_pre_passes(model, qconfig)
 
     # Apply quantization rules to rewrite the model
     logger.info("Applying quantization rules...")

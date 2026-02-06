@@ -14,6 +14,7 @@ from onnx_quantize.core._qconfig import (
     GPTQConfig,
     QActivationArgs,
     QConfig,
+    SmoothQuantConfig,
 )
 
 
@@ -206,18 +207,13 @@ def _set_qparams_gptq(
             node.meta["input"] = collected_outputs[node.inputs[0].name]
 
 
-def calibrate_model(
-    ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: set[str]
-) -> ir.Model:
+def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: set[str]):
     """Calibrates the model by computing scales and zero-points for specified nodes.
 
     Args:
         ir_model (ir.Model): The ONNX IR model to be calibrated.
         qconfig (QConfig): Configuration for quantization parameters.
         op_types_to_calibrate (set[str]): Set of operation types to calibrate.
-
-    Returns:
-        ir.Model: The calibrated ONNX IR model with scales and zero-points added as metadata
     """
     # Get target nodes to calibrate
     nodes_to_calibrate = get_target_nodes(ir_model, op_types_to_calibrate)
@@ -227,11 +223,12 @@ def calibrate_model(
     calibrate_outputs = (
         qconfig.output_activations is not None and qconfig.output_activations.is_static
     )
+    smooth_quant = any(isinstance(pre, SmoothQuantConfig) for pre in qconfig.preprocessors)
     gptq = qconfig.weights is not None and isinstance(qconfig.weights.algorithm, GPTQConfig)
 
     values_to_calibrate = _get_values_to_calibrate(
         get_target_nodes(ir_model, op_types_to_calibrate),
-        augment_inputs=calibrate_inputs or gptq,
+        augment_inputs=calibrate_inputs or gptq or smooth_quant,
         augment_outputs=calibrate_outputs,
     )
 
@@ -275,8 +272,8 @@ def calibrate_model(
             _ActivationKind.OUTPUT,
         )
 
-    if gptq:
-        # This is special case where we need to collect input activations for GPTQ
+    if gptq or smooth_quant:
+        # This is special case where we need to collect input activations for GPTQ/SmoothQuant
         # No need for calibrator here.
         _set_qparams_gptq(
             ir_model,

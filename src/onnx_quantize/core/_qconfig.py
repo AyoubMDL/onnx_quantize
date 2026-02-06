@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from enum import Enum
 
 import numpy as np
@@ -82,7 +83,20 @@ class HqqConfig(BaseModel):
             )
 
 
+class SmoothQuantConfig(BaseModel):
+    """SmoothQuantConfig is the configuration class handling all the SmoothQuant parameters.
+
+    Args:
+        alpha (float, optional): The alpha parameter for SmoothQuant. Defaults to 0.5.
+            This parameter controls how much difficulty we want to migrate from
+            input_tensors to weights.
+    """
+
+    alpha: float = 0.5
+
+
 AlgorithmConfig = GPTQConfig | HqqConfig | None
+PreProcessingConfig = SmoothQuantConfig | None
 
 
 class _BaseArgs(BaseModel):
@@ -269,6 +283,8 @@ class QConfig(BaseModel):
             Defaults to CalibrationParams().
         calibration_data (np.ndarray | None, optional): Calibration data for static quantization.
             Defaults to None.
+        preprocessors (Sequence[PreProcessingConfig], optional): Sequence of pre-processing
+            configurations to apply before quantization. Defaults to an empty tuple.
     """
 
     weights: QWeightArgs | None = None
@@ -281,6 +297,9 @@ class QConfig(BaseModel):
     calibration_params: CalibrationParams | None = Field(default_factory=CalibrationParams)
     calibration_data: np.ndarray | None = None
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    # Preprocessors
+    preprocessors: Sequence[PreProcessingConfig] = ()
 
     @field_validator("format", mode="before")
     def validate_format(cls, value) -> QFormat:
