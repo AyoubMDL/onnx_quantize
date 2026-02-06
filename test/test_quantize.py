@@ -3,11 +3,10 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize import GPTQConfig, HqqConfig, QuantType, quantize
+from onnx_quantize import GPTQConfig, HqqConfig, QuantType, SmoothQuantConfig, quantize
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
-
-from .helpers import onnx_forward_on_models
+from test.helpers import onnx_forward_on_models
 
 
 def _truncated_normal(rng, shape, scale=0.1, clip=2.5):
@@ -420,3 +419,26 @@ def test_quantize_hqq_matmul_nbits_compatibility(rng, model_fn, group_size):
     )
 
     np.testing.assert_allclose(original_output, quantized_output, atol=1e-1)
+
+
+def test_quantize_smooth_quant(rng):
+    model = _get_matmul_model(rng)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt8,
+            strategy="tensor",
+            symmetric=True,
+        ),
+        input_activations=QActivationArgs(
+            dtype=QuantType.QUInt8,
+            is_static=True,
+        ),
+        preprocessors=[SmoothQuantConfig(alpha=0.5)],
+    )
+
+    # Check inference is fine
+    # TODO: modify the test to make it more robust
+    # For the moment, we only check the inference
+    qmodel = quantize(model, qconfig)
+    onnx_forward_on_models(qmodel, samples={"X": _truncated_normal(rng, (2, 32))})

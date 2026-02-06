@@ -8,11 +8,10 @@ from onnx_quantize import GPTQConfig, HqqConfig, QuantType
 from onnx_quantize.core._calibration.calibrate import calibrate_model
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.opset import op
+from onnx_quantize.pre_passes import _add_qconfig_to_nodes
 from onnx_quantize.qfunctions._qdq.qmatmul import qmatmul_qdq_factory
 from onnx_quantize.qrules._qdq.matmul_to_qmatmul import matmul_to_qdq_matmul_rules
-from onnx_quantize.quantize import _add_qconfig_to_nodes
-
-from ...helpers import onnx_forward_on_models
+from test.helpers import onnx_forward_on_models
 
 
 def _get_test_model(rng):

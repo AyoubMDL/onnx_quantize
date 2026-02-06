@@ -1,3 +1,4 @@
+import onnx_ir as ir
 from onnxruntime import InferenceSession
 
 
@@ -6,6 +7,9 @@ def onnx_forward_on_models(*models, samples, sess_options=None):
 
     outputs = []
     for model in models:
+        if isinstance(model, ir.Model):
+            model = ir.to_proto(model)
+
         sess = InferenceSession(
             model.SerializeToString(), providers=["CPUExecutionProvider"], sess_options=sess_options
         )

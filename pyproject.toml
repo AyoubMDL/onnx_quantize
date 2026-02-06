@@ -31,6 +31,7 @@ ignore = [
   "D100",  # Missing module docstring
   "D102",  # Missing function docstring
   "D104",  # Missing public package docstring
+  "D107",  # Missing docstring in __init__
 ]
 
 [tool.ruff.lint.isort]

@@ -11,6 +11,7 @@ from onnx_quantize import (
     QuantizationStrategy,
     QuantType,
     QWeightArgs,
+    SmoothQuantConfig,
 )
 
 
@@ -219,6 +220,16 @@ class TestQConfig:
                 input_activations=QActivationArgs(),
                 output_activations=QActivationArgs(),
             )
+
+    def test_qconfig_empty_preprocessors_default(self):
+        config = QConfig(weights=QWeightArgs())
+        assert config.preprocessors == ()
+
+    def test_qconfig_single_preprocessor(self):
+        config = QConfig(weights=QWeightArgs(), preprocessors=[SmoothQuantConfig(alpha=0.8)])
+        assert len(config.preprocessors) == 1
+        assert isinstance(config.preprocessors[0], SmoothQuantConfig)
+        assert config.preprocessors[0].alpha == 0.8
 
 
 class TestQWeightArgs:

@@ -3,7 +3,7 @@ import onnx
 import onnx_ir as ir
 import onnxscript
 
-from onnx_quantize.pre_rules.standarize_gemm import standarize_gemm_rules
+from onnx_quantize.pre_passes.standarize_gemm import standarize_gemm_rules
 
 
 def _get_gemm_model():
