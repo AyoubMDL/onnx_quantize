@@ -231,6 +231,24 @@ class TestQConfig:
         assert isinstance(config.preprocessors[0], SmoothQuantConfig)
         assert config.preprocessors[0].alpha == 0.8
 
+    def test_qconfig_target_op_types_default(self):
+        config = QConfig(weights=QWeightArgs())
+        assert config.target_op_types == ("MatMul", "Gemm")
+
+    def test_qconfig_target_op_types_removes_duplicates(self):
+        """Test that duplicate target_op_types are removed."""
+        config = QConfig(weights=QWeightArgs(), target_op_types=["MatMul", "Gemm", "MatMul"])
+        assert config.target_op_types == ("Gemm", "MatMul")
+
+    def test_qconfig_target_op_types(self):
+        """Test that duplicate target_op_types are removed."""
+        config = QConfig(weights=QWeightArgs(), target_op_types=["MatMul"])
+        assert config.target_op_types == ("MatMul",)
+
+    def test_qconfig_target_op_types_unsupported(self):
+        with pytest.raises(ValueError, match="Unsupported operator type.*Conv"):
+            QConfig(weights=QWeightArgs(), target_op_types=["MatMul", "Conv"])
+
 
 class TestQWeightArgs:
     def test_qweight_args_invalid_clip_ratio(self):
