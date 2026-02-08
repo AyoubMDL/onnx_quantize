@@ -81,7 +81,7 @@ def test_gemm_to_qgemm_weights_only(rng, strategy, algo):
     )
 
     if isinstance(algo, GPTQConfig):
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul", "Gemm"})
+        calibrate_model(model, qconfig)
     _test_gemm_to_qgemm(rng, model, qconfig)
 
 
@@ -101,7 +101,7 @@ def test_gemm_to_qgemm_weights_only_gemm_nbits(rng, group_size, algo):
     )
 
     if isinstance(algo, GPTQConfig):
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul", "Gemm"})
+        calibrate_model(model, qconfig)
 
     _add_qconfig_to_nodes(model, qconfig)
     model = onnxscript.rewriter.rewrite(model, gemm_to_qdq_gemm_rules)
@@ -165,7 +165,7 @@ def test_gemm_to_qgemm_weights_inputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"Gemm"})
+        calibrate_model(model, qconfig)
     _test_gemm_to_qgemm(rng, model, qconfig)
 
 
@@ -185,7 +185,7 @@ def test_gemm_to_qgemm_weights_outputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"Gemm"})
+        calibrate_model(model, qconfig)
     _test_gemm_to_qgemm(rng, model, qconfig)
 
 
@@ -209,5 +209,5 @@ def test_gemm_to_qgemm_weights_inputs_outputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"Gemm"})
+        calibrate_model(model, qconfig)
     _test_gemm_to_qgemm(rng, model, qconfig)

@@ -442,3 +442,41 @@ def test_quantize_smooth_quant(rng):
     # For the moment, we only check the inference
     qmodel = quantize(model, qconfig)
     onnx_forward_on_models(qmodel, samples={"X": _truncated_normal(rng, (2, 32))})
+
+
+@pytest.mark.parametrize("target_op_types", [("Gemm",), ("MatMul",)])
+def test_quantize_specific_op_types(rng, target_op_types):
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 21] >
+                test_model (float[N, 32] X) => (float [N, ?] Y)
+                <float[32, 64] W1, float[64, 128] W2>
+                {
+                    x1 = MatMul(X, W1)
+                    Y = Gemm(x1, W2)
+                }
+            """)
+    W1 = onnx.numpy_helper.from_array(_truncated_normal(rng, (32, 64)), name="W1")
+    W2 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W2")
+    model.graph.initializer.extend([W1, W2])
+    onnx.checker.check_model(model, full_check=True)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QUInt8,
+            strategy="tensor",
+            symmetric=True,
+        ),
+        target_op_types=target_op_types,
+    )
+
+    qmodel = quantize(model, qconfig)
+
+    # Check that only the specified op types are quantized
+    for original_node, qnode in zip(model.graph.node, qmodel.graph.node, strict=True):
+        if original_node.op_type in target_op_types:
+            assert qnode.domain in {MS_OPSET.domain, QUANT_OPSET.domain}
+        else:
+            assert qnode.domain == ""
+
+    # Check inference is fine
+    onnx_forward_on_models(qmodel, samples={"X": _truncated_normal(rng, (2, 32))})

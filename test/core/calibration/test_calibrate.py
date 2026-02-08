@@ -3,7 +3,7 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize import OP_TYPES_TO_QUANTIZE, CalibrationParams, GPTQConfig
+from onnx_quantize import CalibrationParams, GPTQConfig
 from onnx_quantize.core._calibration.calibrate import calibrate_model
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QuantType, QWeightArgs
 
@@ -39,11 +39,11 @@ def test_calibrate_model_with_samples_inputs(rng, num_samples):
         calibration_data=calibration_data,
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
 
@@ -57,11 +57,11 @@ def test_calibrate_model_with_samples_outputs(rng, num_samples):
         calibration_data=calibration_data,
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "output_scale" in node.meta
             assert "output_zero_point" in node.meta
 
@@ -76,11 +76,11 @@ def test_calibrate_model_with_samples_inputs_outputs(rng, num_samples):
         calibration_data=calibration_data,
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
             assert "output_scale" in node.meta
@@ -93,11 +93,11 @@ def test_calibrate_model_random_samples(rng):
         input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=True),
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
 
@@ -109,11 +109,11 @@ def test_calibrate_model_gptq(rng):
         calibration_data=calibration_data,
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input" in node.meta
 
 
@@ -127,11 +127,11 @@ def test_calibrate_model_with_batch_size(rng, batch_size, num_samples):
         calibration_params=CalibrationParams(batch_size=batch_size, num_samples=num_samples),
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
 
@@ -148,11 +148,11 @@ def test_calibrate_model_batch_size_drops_excess_samples(rng):
         },  # 10 // 3 = 3 batches, 1 sample dropped
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that nodes have quantization params (should still work)
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
 
@@ -165,10 +165,10 @@ def test_calibrate_model_random_with_batch_size(rng):
         calibration_params={"batch_size": 4, "num_samples": 12},
     )
     model = _get_test_model(rng)
-    calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+    calibrate_model(model, qconfig)
 
     # Check that expected nodes have quantization params
     for node in model.graph:
-        if node.op_type in OP_TYPES_TO_QUANTIZE:
+        if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta

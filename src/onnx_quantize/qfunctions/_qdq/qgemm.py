@@ -8,7 +8,7 @@ from onnx_quantize.opset import op
 from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightsOnlyQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_point):
     """Weights-only quantized Gemm following QDQ pattern.
@@ -27,7 +27,7 @@ def QGemmWeightsOnlyQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_point):
     return out
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightInputQDQ(
     X, W, B, w_scale, w_zero_point, b_scale, b_zero_point, x_scale, x_zero_point
@@ -54,7 +54,7 @@ def QGemmWeightInputQDQ(
     return out
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightOutputQDQ(
     X, W, B, w_scale, w_zero_point, b_scale, b_zero_point, out_scale, out_zero_point
@@ -81,7 +81,7 @@ def QGemmWeightOutputQDQ(
     return out_dequantized
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightInputOutputQDQ(
     X,
@@ -125,7 +125,7 @@ def QGemmWeightInputOutputQDQ(
     return out_dequantized
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightDynamicInputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_point):
     """Dynamic quantized Gemm with weight and dynamic input activation following QDQ pattern.
@@ -152,7 +152,7 @@ def QGemmWeightDynamicInputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_p
     return out
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightDynamicOutputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_point):
     """Dynamic quantized Gemm with weight and dynamic output activation following QDQ pattern.
@@ -178,7 +178,7 @@ def QGemmWeightDynamicOutputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_
     return out_dequantized
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QGemmWeightDynamicInputOutputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_zero_point):
     """Fully dynamic quantized Gemm with weight, dynamic input and output activations.
@@ -211,7 +211,7 @@ def QGemmWeightDynamicInputOutputQDQ(X, W, B, w_scale, w_zero_point, b_scale, b_
 
 
 def _make_qgemm_weight_only_grouped(group_size):
-    @register_qfunction(target_optype="Gemm")
+    @register_qfunction
     @script(opset=QUANT_OPSET)
     def QGemmWeightsOnlyGrouped(
         X, W, B, w_scale, w_zero_point, b_scale, b_zero_point, original_transposed_shape
@@ -236,7 +236,7 @@ def _make_qgemm_weight_only_grouped(group_size):
 
 
 def _make_qgemm_weight_only_grouped_4bits(group_size):
-    @register_qfunction(target_optype="Gemm")
+    @register_qfunction
     @script(opset=QUANT_OPSET)
     def QGemmWeightsOnlyGrouped(
         X, W, B, w_scale, w_zero_point, b_scale, b_zero_point, original_transposed_shape

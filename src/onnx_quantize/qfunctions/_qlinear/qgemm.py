@@ -4,7 +4,7 @@ from onnx_quantize.opset import op
 from onnx_quantize.qfunctions.register import MS_OPSET, QUANT_OPSET, register_qfunction
 
 
-@register_qfunction(target_optype="Gemm")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QLinearGemm(
     X,

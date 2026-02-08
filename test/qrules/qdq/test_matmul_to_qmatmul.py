@@ -71,7 +71,7 @@ def test_matmul_to_qmatmul_weights_only(rng, strategy, algo):
     )
 
     if isinstance(algo, GPTQConfig):
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+        calibrate_model(model, qconfig)
     _test_matmul_to_qmatmul(rng, model, qconfig)
 
 
@@ -91,7 +91,7 @@ def test_matmul_to_qmatmul_weights_only_matmul_nbits(rng, group_size, algo):
     )
 
     if isinstance(algo, GPTQConfig):
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+        calibrate_model(model, qconfig)
 
     _add_qconfig_to_nodes(model, qconfig)
     model = onnxscript.rewriter.rewrite(model, matmul_to_qdq_matmul_rules)
@@ -155,7 +155,7 @@ def test_matmul_to_qmatmul_weights_inputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+        calibrate_model(model, qconfig)
     _test_matmul_to_qmatmul(rng, model, qconfig)
 
 
@@ -175,7 +175,7 @@ def test_matmul_to_qmatmul_weights_outputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+        calibrate_model(model, qconfig)
     _test_matmul_to_qmatmul(rng, model, qconfig)
 
 
@@ -199,5 +199,5 @@ def test_matmul_to_qmatmul_weights_inputs_outputs(rng, is_static):
     )
 
     if is_static:
-        calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+        calibrate_model(model, qconfig)
     _test_matmul_to_qmatmul(rng, model, qconfig)
