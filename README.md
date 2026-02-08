@@ -1,5 +1,7 @@
 # onnx-quantize
 
+[![PyPI](https://img.shields.io/pypi/v/onnx_quantize.svg)](https://pypi.org/project/onnx_quantize/)
+
 **ONNX Quantization Framework** built on top of  
 - [ONNX IR](https://github.com/onnx/ir-py)  
 - [ONNXScript](https://github.com/microsoft/onnxscript)  
@@ -46,6 +48,9 @@ qmodel = quantize(model, qconfig)
 # Save the quantized model
 onnx.save(qmodel, "qmodel.onnx")
 ```
+
+## Quantization Flow
+![Quantization Flow Diagram](./docs/assets/flow.png)
 
 ## ✨ Features
 
