@@ -5,7 +5,6 @@ import onnx_ir.passes.common as common_passes
 import onnxscript
 from onnxscript.rewriter.rules.common import matmul_add_to_gemm_rule
 
-from onnx_quantize import OP_TYPES_TO_QUANTIZE
 from onnx_quantize.core._calibration.calibrate import calibrate_model, get_target_nodes
 from onnx_quantize.core._qconfig import GPTQConfig, QConfig, SmoothQuantConfig
 from onnx_quantize.pre_passes.smooth_quant import SmoothQuantPass
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _add_qconfig_to_nodes(ir_model: ir.Model, qconfig: QConfig) -> None:
-    nodes = get_target_nodes(ir_model, OP_TYPES_TO_QUANTIZE)
+    nodes = get_target_nodes(ir_model, qconfig.target_op_types)
 
     for node in ir_model.graph:
         if node in nodes:
@@ -62,14 +61,16 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     # CHECK: this violates input scales when smooth quant is applied
     if _needs_calibration(qconfig):
         logger.info("Calibrating the model...")
-        calibrate_model(model, qconfig, OP_TYPES_TO_QUANTIZE)
+        calibrate_model(model, qconfig)
 
     _add_qconfig_to_nodes(model, qconfig)
 
     pre_quantization_passes = []
     for preprocessor in qconfig.preprocessors:
         if isinstance(preprocessor, SmoothQuantConfig):
-            pre_quantization_passes.append(SmoothQuantPass(alpha=preprocessor.alpha))
+            pre_quantization_passes.append(
+                SmoothQuantPass(alpha=preprocessor.alpha, target_op_types=qconfig.target_op_types)
+            )
 
     pre_quantization_passes.append(common_passes.CheckerPass(full_check=True))
     pre_quantization_passes = ir.passes.Sequential(*pre_quantization_passes)

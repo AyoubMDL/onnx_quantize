@@ -85,5 +85,5 @@ def test_gemm_to_qgemm_weights_inputs_outputs(rng, strategy):
         format="qlinear",
     )
 
-    calibrate_model(model, qconfig, op_types_to_calibrate={"Gemm"})
+    calibrate_model(model, qconfig)
     _test_gemm_to_qgemm(rng, model, qconfig)

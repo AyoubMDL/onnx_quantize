@@ -9,9 +9,6 @@ from onnx_quantize.core._qconfig import QConfig
 logger = logging.getLogger(__name__)
 
 
-_SMOOTH_QUANT_OPS = {"MatMul", "Gemm"}
-
-
 # TODO: add folding of mul nodes
 # see https://github.com/intel/neural-compressor/blob/master/neural_compressor/adaptor/ox_utils/smooth_quant.py
 class SmoothQuantPass(ir.passes.InPlacePass):
@@ -21,8 +18,9 @@ class SmoothQuantPass(ir.passes.InPlacePass):
         alpha (float): Smoothing factor between 0 and 1.
     """
 
-    def __init__(self, alpha):
+    def __init__(self, alpha, target_op_types):
         self.alpha = alpha
+        self.target_op_types = target_op_types
 
     def call(self, model: ir.Model) -> ir.passes.PassResult:
         """Main entry point for the smooth quantization pass."""
@@ -65,7 +63,7 @@ class SmoothQuantPass(ir.passes.InPlacePass):
         node.replace_input_with(0, mul_node.outputs[0])
 
     def _smooth_quant_node(self, node: ir.Node, model: ir.Model) -> bool:
-        if node.op_type not in _SMOOTH_QUANT_OPS or node.domain != "":
+        if node.op_type not in self.target_op_types or node.domain != "":
             return False
 
         if ir.convenience.get_const_tensor(node.inputs[1]) is None:
@@ -94,7 +92,7 @@ class SmoothQuantPass(ir.passes.InPlacePass):
         )
 
         # 6. Input activation metadata need to be updated as the activations were scaled
-        node.meta["input"] *= scale.reshape((1, -1))
+        node.meta["input"] /= scale.reshape((1, -1))
 
         # 7. Insert the Mul node before the current node
         self._insert_mul_node_before(node, model, scale_initializer)

@@ -1,28 +1,64 @@
+import copy
+
 import numpy as np
 import onnx
 import onnx_ir as ir
 import pytest
+from onnx_ir._cloner import Cloner
 
 from onnx_quantize import QConfig, SmoothQuantConfig
+from onnx_quantize.core._qconfig import _SUPPORTED_OP_TYPES
 from onnx_quantize.pre_passes import _add_qconfig_to_nodes, calibrate_model
-from onnx_quantize.pre_passes.smooth_quant import _SMOOTH_QUANT_OPS, SmoothQuantPass
+from onnx_quantize.pre_passes.smooth_quant import SmoothQuantPass
 from test.helpers import onnx_forward_on_models
 
 
-def _preprocess_model(rng, model):
+@pytest.fixture(scope="module", autouse=True)
+def patch_cloner_for_test():
+    """
+    Patch the Cloner class to perform a deep copy of the meta field.
+    TODO: remove this if it is fixed in onnx_ir.
+    """
+    original_clone = Cloner.clone_node
+
+    def clone_with_meta_copy(self, node):
+        new_node = original_clone(self, node)
+
+        if node.meta:
+            for k, v in node.meta.items():
+                new_node.meta[k] = copy.deepcopy(v)
+
+            new_node.meta._invalid_keys = set(node.meta._invalid_keys)
+
+        # Copy output properties
+        for output, new_output in zip(node.outputs, new_node.outputs, strict=True):
+            if output.meta:
+                for k, v in output.meta.items():
+                    new_output.meta[k] = copy.deepcopy(v)
+
+                new_output.meta._invalid_keys = set(output.meta._invalid_keys)
+        return new_node
+
+    Cloner.clone_node = clone_with_meta_copy
+
+    yield
+
+    # Restore original after all tests in this module complete
+    Cloner.clone_node = original_clone
+
+
+def _preprocess_model(rng, model, calib_data):
     # Calibrate the model to compute activation scales for smooth quantization tests
-    calib_data = rng.normal(size=(1, 32)).astype(np.float32)
     qconfig = QConfig(preprocessors=[SmoothQuantConfig()], calibration_data=calib_data)
     calibrate_model(
         model,
         qconfig,
-        op_types_to_calibrate=_SMOOTH_QUANT_OPS,
     )
 
     _add_qconfig_to_nodes(model, qconfig)
 
 
-def _get_matmul_model(rng):
+def _get_matmul_model(rng, calib_data):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 21] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -35,12 +71,12 @@ def _get_matmul_model(rng):
     model.graph.initializer.extend([W1])
     onnx.checker.check_model(model, full_check=True)
     model = ir.from_proto(model)
-    _preprocess_model(rng, model)
+    _preprocess_model(rng, model, calib_data)
 
     return model
 
 
-def _get_gemm_model(rng):
+def _get_gemm_model(rng, calib_data):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
                 test_model (float[N, 32] X) => (float [N, ?] Y)
@@ -59,7 +95,7 @@ def _get_gemm_model(rng):
     model.graph.initializer.extend([W1, B1, W2])
     onnx.checker.check_model(model, full_check=True)
     model = ir.from_proto(model)
-    _preprocess_model(rng, model)
+    _preprocess_model(rng, model, calib_data)
 
     return model
 
@@ -69,8 +105,10 @@ def _get_gemm_model(rng):
     "model_fn, expected_num_mul", [(_get_matmul_model, 1), (_get_gemm_model, 2)]
 )
 def test_smooth_quant(rng, alpha, model_fn, expected_num_mul):
-    model = model_fn(rng)
-    smooth_quant_pass = SmoothQuantPass(alpha=alpha)
+    calib_data = rng.normal(size=(1, 32)).astype(np.float32)
+    model = model_fn(rng, calib_data)
+
+    smooth_quant_pass = SmoothQuantPass(alpha=alpha, target_op_types=_SUPPORTED_OP_TYPES)
     result = smooth_quant_pass(model.clone())
 
     # Check that the pass modified the model
@@ -86,3 +124,22 @@ def test_smooth_quant(rng, alpha, model_fn, expected_num_mul):
         model, result.model, samples={"X": samples}
     )
     np.testing.assert_allclose(original_outputs, updated_outputs, atol=5e-5)
+
+    # Check that the input metadata is preserved correctly
+    # When calibrating the updated model, we need to have the same activation
+    # in node.meta["input"]
+    updated_model_clone = result.model.clone()
+    calibrate_model(
+        updated_model_clone,
+        QConfig(preprocessors=[SmoothQuantConfig()], calibration_data=calib_data),
+    )
+
+    for smooth_node, calib_node in zip(result.model.graph, updated_model_clone.graph, strict=True):
+        if (activation := smooth_node.meta.get("input")) is not None and (
+            calib_activation := calib_node.meta.get("input")
+        ) is not None:
+            np.testing.assert_allclose(
+                activation,
+                calib_activation,
+                atol=1e-5,
+            )

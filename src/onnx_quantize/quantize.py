@@ -52,17 +52,17 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
     # Optimize model before quantization
     model = onnxscript.optimizer.optimize(model)
 
-    # Run pre rules quant
+    # Update opset version
+    onnxscript.version_converter.convert_version(model, target_version=op.version)
+
+    # Run pre rules quantization
     logger.info("Applying pre-quantization rules...")
     model = apply_pre_passes(model, qconfig)
 
     # Apply quantization rules to rewrite the model
     logger.info("Applying quantization rules...")
-    qrules = get_qrules(qconfig.format)
+    qrules = get_qrules(qconfig)
     model = onnxscript.rewriter.rewrite(model, qrules)
-
-    # Update opset version
-    onnxscript.version_converter.convert_version(model, target_version=op.version)
 
     # Add quantization functions to the model
     model.functions.update(get_qfunctions())

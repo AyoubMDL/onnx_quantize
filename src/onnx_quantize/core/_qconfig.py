@@ -13,6 +13,8 @@ from onnx_quantize.core._dtypes import QuantType
 
 logger = logging.getLogger(__name__)
 
+_SUPPORTED_OP_TYPES = ("MatMul", "Gemm")
+
 
 class QuantizationStrategy(str, Enum):
     """Enum storing quantization strategy options."""
@@ -272,6 +274,8 @@ class QConfig(BaseModel):
     """QConfig is the main configuration class handling all the quantization parameters.
 
     Args:
+        target_op_types (Sequence[str], optional): Sequence of target operator types to quantize.
+            Defaults to {"MatMul", "Gemm"}.
         weights (QWeightArgs | None, optional): Weight quantization parameters.
             Defaults to None.
         input_activations (QActivationArgs | None, optional): Input activation quantization
@@ -287,6 +291,7 @@ class QConfig(BaseModel):
             configurations to apply before quantization. Defaults to an empty tuple.
     """
 
+    target_op_types: Sequence[str] = Field(default_factory=lambda: _SUPPORTED_OP_TYPES)
     weights: QWeightArgs | None = None
     input_activations: QActivationArgs | None = None
     output_activations: QActivationArgs | None = None
@@ -299,7 +304,12 @@ class QConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     # Preprocessors
-    preprocessors: Sequence[PreProcessingConfig] = ()
+    preprocessors: Sequence[PreProcessingConfig] = Field(default_factory=tuple)
+
+    @field_validator("target_op_types", mode="before")
+    def validate_target_op_types(cls, value) -> Sequence[str]:
+        # Remove duplicates and convert to tuple for immutability
+        return tuple(sorted(set(value)))
 
     @field_validator("format", mode="before")
     def validate_format(cls, value) -> QFormat:
@@ -360,6 +370,13 @@ class QConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_model_after(self: QConfig) -> QConfig:
+        for op_type in self.target_op_types:
+            if op_type not in _SUPPORTED_OP_TYPES:
+                raise ValueError(
+                    f"Unsupported operator type '{op_type}' in target_op_types. "
+                    f"Supported operator types are: {_SUPPORTED_OP_TYPES}"
+                )
+
         # Check if everything is None
         if (
             self.weights is None

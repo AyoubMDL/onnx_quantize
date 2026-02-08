@@ -207,7 +207,7 @@ def _set_qparams_gptq(
             node.meta["input"] = collected_outputs[node.inputs[0].name]
 
 
-def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate: set[str]):
+def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
     """Calibrates the model by computing scales and zero-points for specified nodes.
 
     Args:
@@ -216,7 +216,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate:
         op_types_to_calibrate (set[str]): Set of operation types to calibrate.
     """
     # Get target nodes to calibrate
-    nodes_to_calibrate = get_target_nodes(ir_model, op_types_to_calibrate)
+    nodes_to_calibrate = get_target_nodes(ir_model, qconfig.target_op_types)
 
     # Identify which activations to calibrate
     calibrate_inputs = qconfig.input_activations is not None and qconfig.input_activations.is_static
@@ -227,7 +227,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig, op_types_to_calibrate:
     gptq = qconfig.weights is not None and isinstance(qconfig.weights.algorithm, GPTQConfig)
 
     values_to_calibrate = _get_values_to_calibrate(
-        get_target_nodes(ir_model, op_types_to_calibrate),
+        nodes_to_calibrate,
         augment_inputs=calibrate_inputs or gptq or smooth_quant,
         augment_outputs=calibrate_outputs,
     )

@@ -6,7 +6,7 @@ from onnx_quantize.opset import op
 from onnx_quantize.qfunctions.register import QUANT_OPSET, register_qfunction
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightsOnlyQDQ(X, W, w_scale, w_zero_point):
     """Weights-only quantized MatMul following QDQ pattern.
@@ -22,7 +22,7 @@ def QMatMulWeightsOnlyQDQ(X, W, w_scale, w_zero_point):
     return out
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightStaticInputQDQ(X, W, w_scale, w_zero_point, x_scale, x_zero_point):
     """Quantized MatMul with weight and input activation quantization following QDQ pattern.
@@ -44,7 +44,7 @@ def QMatMulWeightStaticInputQDQ(X, W, w_scale, w_zero_point, x_scale, x_zero_poi
     return out
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightStaticOutputQDQ(X, W, w_scale, w_zero_point, out_scale, out_zero_point):
     """Quantized MatMul with weight and output activation quantization following QDQ pattern.
@@ -66,7 +66,7 @@ def QMatMulWeightStaticOutputQDQ(X, W, w_scale, w_zero_point, out_scale, out_zer
     return out_dequantized
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightStaticInputOutputQDQ(
     X, W, w_scale, w_zero_point, x_scale, x_zero_point, out_scale, out_zero_point
@@ -97,7 +97,7 @@ def QMatMulWeightStaticInputOutputQDQ(
     return out_dequantized
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightDynamicInputQDQ(X, W, w_scale, w_zero_point):
     """Dynamic quantized MatMul with weight and dynamic input activation following QDQ pattern.
@@ -121,7 +121,7 @@ def QMatMulWeightDynamicInputQDQ(X, W, w_scale, w_zero_point):
     return out
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightDynamicOutputQDQ(X, W, w_scale, w_zero_point):
     """Dynamic quantized MatMul with weight and dynamic output activation following QDQ pattern.
@@ -144,7 +144,7 @@ def QMatMulWeightDynamicOutputQDQ(X, W, w_scale, w_zero_point):
     return out_dequantized
 
 
-@register_qfunction(target_optype="MatMul")
+@register_qfunction
 @script(opset=QUANT_OPSET)
 def QMatMulWeightDynamicInputOutputQDQ(X, W, w_scale, w_zero_point):
     """Fully dynamic quantized MatMul with weight, dynamic input and output activations.
@@ -174,7 +174,7 @@ def QMatMulWeightDynamicInputOutputQDQ(X, W, w_scale, w_zero_point):
 
 
 def _make_qmatmul_weight_only_grouped(group_size):
-    @register_qfunction(target_optype="MatMul")
+    @register_qfunction
     @script(opset=QUANT_OPSET)
     def QMatMulWeightsOnlyGrouped(X, W, w_scale, w_zero_point, original_transposed_shape):
         # (in_channels, out_channels) -> (out_channels x num_groups, group_size)
@@ -193,7 +193,7 @@ def _make_qmatmul_weight_only_grouped(group_size):
 
 
 def _make_qmatmul_weight_only_grouped_4bits(group_size):
-    @register_qfunction(target_optype="MatMul")
+    @register_qfunction
     @script(opset=QUANT_OPSET)
     def QMatMulWeightsOnlyGrouped(X, W, w_scale, w_zero_point, original_transposed_shape):
         # Cast to INT8 as Ort Reshape doesn't support INT4/UINT4

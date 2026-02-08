@@ -76,5 +76,5 @@ def test_matmul_to_qmatmul_weights_inputs_outputs(rng, strategy):
         format="qlinear",
     )
 
-    calibrate_model(model, qconfig, op_types_to_calibrate={"MatMul"})
+    calibrate_model(model, qconfig)
     _test_matmul_to_qmatmul(rng, model, qconfig)
