@@ -252,7 +252,7 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range, scale_d
         zp_dtype (np.dtype): The desired data type for the zero point.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
+        tuple[np.ndarray, np.ndarray]: The quantization scale factor and zero point.
     """
 
     def _compute_qparams_asymmetric(rmin, rmax, quant_type):
@@ -319,7 +319,7 @@ def _compute_qparams_from_array(
         zp_dtype (np.dtype): The desired data type for the zero point.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: The quantization scale factor and null zero point.
+        tuple[np.ndarray, np.ndarray]: The quantization scale factor and zero point.
     """
     rmin, rmax = _compute_min_max(array, strategy, group_size, clip_ratio)
 
