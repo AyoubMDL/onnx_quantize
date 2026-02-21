@@ -7,6 +7,18 @@ from onnx_quantize.qfunctions._qlinear.qgemm import QLinearGemm
 from onnx_quantize.qfunctions._qlinear.qmatmul import QLinearMatMul
 
 
+_QFUNCTIONS = {
+    QFormat.QDQ: {
+        "Gemm": qgemm_qdq_factory,
+        "MatMul": qmatmul_qdq_factory,
+    },
+    QFormat.QLINEAR: {
+        "Gemm": lambda _: QLinearGemm,
+        "MatMul": lambda _: QLinearMatMul,
+    },
+}
+
+
 def get_qfunction(op_type: str, qconfig: QConfig):
     """Factory function to get the appropriate quantized operator based on op_type and qconfig.
 
@@ -20,13 +32,4 @@ def get_qfunction(op_type: str, qconfig: QConfig):
     format = qconfig.format
     assert isinstance(format, QFormat)
 
-    if format == QFormat.QDQ:
-        if op_type == "MatMul":
-            return qmatmul_qdq_factory(qconfig)
-        elif op_type == "Gemm":
-            return qgemm_qdq_factory(qconfig)
-    else:
-        if op_type == "MatMul":
-            return QLinearMatMul
-        elif op_type == "Gemm":
-            return QLinearGemm
+    return _QFUNCTIONS.get(format, {}).get(op_type, None)(qconfig)
