@@ -6,7 +6,8 @@ import onnxscript
 from onnxscript.rewriter.rules.common import matmul_add_to_gemm_rule
 
 from onnx_quantize.core._calibration.calibrate import calibrate_model, get_target_nodes
-from onnx_quantize.core._qconfig import GPTQConfig, QConfig, SmoothQuantConfig
+from onnx_quantize.core._qconfig import AwqConfig, GPTQConfig, QConfig, SmoothQuantConfig
+from onnx_quantize.pre_passes.awq import AwqPass
 from onnx_quantize.pre_passes.smooth_quant import SmoothQuantPass
 from onnx_quantize.pre_passes.standarize_gemm import standarize_gemm_rules
 
@@ -30,7 +31,7 @@ def _needs_calibration(qconfig: QConfig) -> bool:
     if qconfig.output_activations and qconfig.output_activations.is_static:
         return True
 
-    if any(isinstance(pre, SmoothQuantConfig) for pre in qconfig.preprocessors):
+    if any(isinstance(pre, (SmoothQuantConfig, AwqConfig)) for pre in qconfig.preprocessors):
         return True
 
     if qconfig.weights and isinstance(qconfig.weights.algorithm, GPTQConfig):
@@ -58,7 +59,6 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     model = standard_passes(model).model
 
     # Calibrate the model to compute quantization parameters
-    # CHECK: this violates input scales when smooth quant is applied
     if _needs_calibration(qconfig):
         logger.info("Calibrating the model...")
         calibrate_model(model, qconfig)
@@ -70,6 +70,13 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
         if isinstance(preprocessor, SmoothQuantConfig):
             pre_quantization_passes.append(
                 SmoothQuantPass(alpha=preprocessor.alpha, target_op_types=qconfig.target_op_types)
+            )
+
+        elif isinstance(preprocessor, AwqConfig):
+            pre_quantization_passes.append(
+                AwqPass(
+                    clip_search=preprocessor.clip_search, target_op_types=qconfig.target_op_types
+                )
             )
 
     pre_quantization_passes.append(common_passes.CheckerPass(full_check=True))

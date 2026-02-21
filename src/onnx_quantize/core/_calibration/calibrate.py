@@ -11,6 +11,7 @@ import onnxruntime
 from onnx_quantize.core._algorithms.utils import _compute_qparams
 from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
 from onnx_quantize.core._qconfig import (
+    AwqConfig,
     GPTQConfig,
     QActivationArgs,
     QConfig,
@@ -224,11 +225,12 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
         qconfig.output_activations is not None and qconfig.output_activations.is_static
     )
     smooth_quant = any(isinstance(pre, SmoothQuantConfig) for pre in qconfig.preprocessors)
+    awq = any(isinstance(pre, AwqConfig) for pre in qconfig.preprocessors)
     gptq = qconfig.weights is not None and isinstance(qconfig.weights.algorithm, GPTQConfig)
 
     values_to_calibrate = _get_values_to_calibrate(
         nodes_to_calibrate,
-        augment_inputs=calibrate_inputs or gptq or smooth_quant,
+        augment_inputs=calibrate_inputs or gptq or smooth_quant or awq,
         augment_outputs=calibrate_outputs,
     )
 
@@ -272,8 +274,8 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
             _ActivationKind.OUTPUT,
         )
 
-    if gptq or smooth_quant:
-        # This is special case where we need to collect input activations for GPTQ/SmoothQuant
+    if gptq or smooth_quant or awq:
+        # This is special case where we need to collect input activations for GPTQ/SmoothQuant/AWQ
         # No need for calibrator here.
         _set_qparams_gptq(
             ir_model,

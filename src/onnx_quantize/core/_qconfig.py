@@ -97,8 +97,18 @@ class SmoothQuantConfig(BaseModel):
     alpha: float = 0.5
 
 
+class AwqConfig(BaseModel):
+    """AwqConfig is the configuration class handling all the AWQ parameters.
+
+    Args:
+        clip_search (bool, optional): Whether to perform clip value search. Defaults to False.
+    """
+
+    clip_search: bool = False
+
+
 AlgorithmConfig = GPTQConfig | HqqConfig | None
-PreProcessingConfig = SmoothQuantConfig | None
+PreProcessingConfig = SmoothQuantConfig | AwqConfig | None
 
 
 class _BaseArgs(BaseModel):

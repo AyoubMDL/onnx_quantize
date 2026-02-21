@@ -3,7 +3,7 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize import GPTQConfig, HqqConfig, QuantType, SmoothQuantConfig, quantize
+from onnx_quantize import AwqConfig, GPTQConfig, HqqConfig, QuantType, SmoothQuantConfig, quantize
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
 from test.helpers import onnx_forward_on_models
@@ -480,3 +480,31 @@ def test_quantize_specific_op_types(rng, target_op_types):
 
     # Check inference is fine
     onnx_forward_on_models(qmodel, samples={"X": _truncated_normal(rng, (2, 32))})
+
+
+@pytest.mark.parametrize("clip_search", [False, True])
+@pytest.mark.parametrize(
+    "strategy, group_size", [("tensor", None), ("channel", None), ("group", 16)]
+)
+@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model])
+def test_quantize_awq(rng, model_fn, strategy, group_size, clip_search):
+    model = model_fn(rng)
+    calibration_data = _truncated_normal(rng, (2, 32))
+
+    qconfig = QConfig(
+        weights=QWeightArgs(
+            dtype=QuantType.QInt8,
+            strategy=strategy,
+            group_size=group_size,
+        ),
+        preprocessors=[AwqConfig(clip_search=clip_search)],
+        calibration_data=calibration_data,
+    )
+
+    qmodel = quantize(model, qconfig)
+
+    test_samples = _truncated_normal(rng, (2, 32))
+    original_output, quantized_output = onnx_forward_on_models(
+        model, qmodel, samples={"X": test_samples}
+    )
+    np.testing.assert_allclose(original_output, quantized_output, atol=1e-1)
