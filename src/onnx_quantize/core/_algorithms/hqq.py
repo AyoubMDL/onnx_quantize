@@ -2,8 +2,11 @@ __all__ = ["_hqq_quantize"]
 
 import numpy as np
 
-from onnx_quantize.core._algorithms.rtn import _rtn_quantize
-from onnx_quantize.core._algorithms.utils import _preprocess_array
+from onnx_quantize.core._algorithms.utils import (
+    _compute_qparams_from_array,
+    _post_process_array,
+    _preprocess_array,
+)
 from onnx_quantize.core._dtypes import QuantType
 from onnx_quantize.core._qconfig import QuantizationStrategy
 
@@ -21,7 +24,6 @@ def _optimize_zero_point(
     scale: np.ndarray,
     zero_point: np.ndarray,
     quant_type: QuantType,
-    group_size: int,
     reduce_range: bool = False,
     lp_norm: float = 0.7,
     beta: float = 1e1,
@@ -29,10 +31,7 @@ def _optimize_zero_point(
     iters: int = 20,
     early_stop: bool = True,
 ) -> np.ndarray:
-    assert group_size > 0, "Group size must be greater than 0 for HQQ optimization."
-    w_f = _preprocess_array(w_f, QuantizationStrategy.GROUP, group_size)
-
-    best_error = 1e4
+    best_error = np.inf
     best_zero_point = zero_point.copy()
 
     # Hqq uses scale inverted for computation
@@ -52,13 +51,12 @@ def _optimize_zero_point(
             best_error = current_error
             best_zero_point = zero_point.copy()
 
-            if early_stop:
-                break
+        elif early_stop:
+            break
 
         # Update zero point
         zero_point = np.mean(w_q - (w_f - w_e) * scale, axis=1, keepdims=True)
 
-    del w_f, w_q, w_r, w_e
     return best_zero_point
 
 
@@ -77,11 +75,23 @@ def _hqq_quantize(
     iters: int = 20,
     early_stop: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    def quantize(array, scale, zero_point, quant_type, is_symmetric, reduce_range):
+        array_scaled = array / scale
+        # We don't cast to int32 here
+        shifted_tensor = np.round(array_scaled + zero_point)
+
+        qmin, qmax = quant_type.qrange(is_symmetric, reduce_range)
+        q_array = np.clip(shifted_tensor, qmin, qmax)
+
+        return q_array.astype(quant_type.np_dtype)
+
     # In hqq, scale and zero point must have the same dtype
     assert zp_dtype == scale_dtype
 
-    w_q, scale, zero_point = _rtn_quantize(
-        w_f,
+    preprocessed_array = _preprocess_array(w_f, QuantizationStrategy.GROUP, group_size)
+    scale, zero_point = _compute_qparams_from_array(
+        preprocessed_array,
         quant_type,
         QuantizationStrategy.GROUP,
         group_size,
@@ -94,11 +104,10 @@ def _hqq_quantize(
     )
 
     zero_point = _optimize_zero_point(
-        w_f,
+        preprocessed_array,
         scale,
         zero_point,
         quant_type,
-        group_size,
         reduce_range,
         lp_norm,
         beta,
@@ -106,5 +115,15 @@ def _hqq_quantize(
         iters,
         early_stop,
     )
+
+    w_q = quantize(
+        preprocessed_array,
+        scale,
+        zero_point,
+        quant_type,
+        is_symmetric=False,
+        reduce_range=reduce_range,
+    )
+    w_q = _post_process_array(w_q, w_f, QuantizationStrategy.GROUP, group_size)
 
     return w_q, scale, zero_point

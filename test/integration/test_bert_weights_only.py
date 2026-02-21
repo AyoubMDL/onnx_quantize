@@ -54,7 +54,7 @@ def bert_model(bert_onnx_dir):
     [
         (QuantType.QUInt8, "channel", None, None, 0.94),
         (QuantType.QUInt4, "group", 128, None, 0.93),
-        (QuantType.QUInt4, "group", 128, HqqConfig(early_stop=False), 0.92),
+        (QuantType.QUInt4, "group", 128, HqqConfig(early_stop=False), 0.94),
     ],
 )
 def test_quantize_bert_weights_only(
