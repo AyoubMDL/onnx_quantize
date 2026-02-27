@@ -1,5 +1,7 @@
 """MatMul to QMatMul rewriter using QDQ pattern."""
 
+import enum
+
 import onnx_ir as ir
 import onnxscript
 
@@ -7,6 +9,11 @@ from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
 from onnx_quantize.qrules._common import is_matmul_nbits_compatible, quantize_weights
 from onnx_quantize.qrules.base import QRewriter
+
+
+class _ActivationKind(enum.Enum):
+    INPUT = "input"
+    OUTPUT = "output"
 
 
 class MatMulToQMatMul(QRewriter):
@@ -33,16 +40,21 @@ class MatMulToQMatMul(QRewriter):
             return check_result.fail("Weight is not a constant tensor.")
         return check_result
 
-    def _get_activation_qparams(self, op, node, prefix, qconfig_act):
+    def _get_activation_qparams(self, op, node, kind, qconfig_act):
         if qconfig_act is None or not qconfig_act.is_static:
             return None, None
 
-        # Extract calibrated scale and zero_point from node metadata
-        scale_key = f"{prefix}_scale"
-        zp_key = f"{prefix}_zero_point"
+        # Add a prefix to the initializer name to ensure uniqueness
+        prefix = node.inputs[0].name if kind == _ActivationKind.INPUT else node.outputs[0].name
 
-        scale = op.initializer(ir.tensor(node.meta[scale_key]), name=f"{prefix}/scale")
-        zero_point = op.initializer(ir.tensor(node.meta[zp_key]), name=f"{prefix}/zero_point")
+        # Extract calibrated scale and zero_point from node metadata
+        scale_key = f"{kind.value}_scale"
+        zp_key = f"{kind.value}_zero_point"
+
+        scale = op.initializer(ir.tensor(node.meta[scale_key]), name=f"{prefix}_{kind.value}/scale")
+        zero_point = op.initializer(
+            ir.tensor(node.meta[zp_key]), name=f"{prefix}_{kind.value}/zero_point"
+        )
 
         return scale, zero_point
 
@@ -119,10 +131,10 @@ class MatMulToQMatMul(QRewriter):
 
         # 2: Get activation quantization parameters
         input_scale, input_zero_point = self._get_activation_qparams(
-            op, node, "input", qconfig.input_activations
+            op, node, _ActivationKind.INPUT, qconfig.input_activations
         )
         out_scale, out_zero_point = self._get_activation_qparams(
-            op, node, "output", qconfig.output_activations
+            op, node, _ActivationKind.OUTPUT, qconfig.output_activations
         )
 
         # 3: Build argument list based on what's needed
