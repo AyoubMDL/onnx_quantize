@@ -76,15 +76,15 @@ class AwqPass(ir.passes.InPlacePass):
         return ir.passes.PassResult(model, modified=modified)
 
     def is_valid_node(self, node: ir.Node) -> bool:
-        constrains = (
-            node.op_type not in self.target_op_types,
-            node.op_type not in _SUPPORTED_OPS,
-            node.domain != "",
-            ir.convenience.get_const_tensor(node.inputs[1]) is None,
-            node.attributes.get("transB", ir.AttrInt64("transB", 0)).as_int() != 0,
-        )
+        constrains = [
+            lambda: node.op_type not in self.target_op_types,
+            lambda: node.op_type not in _SUPPORTED_OPS,
+            lambda: node.domain != "",
+            lambda: ir.convenience.get_const_tensor(node.inputs[1]) is None,
+            lambda: node.attributes.get("transB", ir.AttrInt64("transB", 0)).as_int() != 0,
+        ]
 
-        return not any(constrains)
+        return not any(check() for check in constrains)
 
     def _apply_awq(self, node: ir.Node, model: ir.Model) -> bool:
         if not self.is_valid_node(node):

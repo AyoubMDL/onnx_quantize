@@ -4,40 +4,47 @@ import torch
 from optimum.onnxruntime import ORTModelForSequenceClassification
 from tqdm import tqdm
 
-from onnx_quantize import AwqConfig, HqqConfig, QConfig, QuantType, QWeightArgs, quantize
+from onnx_quantize import QConfig, QuantType, QWeightArgs, quantize
+from onnx_quantize.core._qconfig import AwqConfig, QActivationArgs, SmoothQuantConfig
 
 
 @pytest.mark.parametrize(
-    "quant_type, strategy, group_size, algorithm, preprocessors, expected_accuracy",
+    "quant_type, act_dtype, symmetric, is_static, preprocessor, expected_accuracy",
     [
-        (QuantType.QUInt8, "channel", None, None, None, 0.94),
-        (QuantType.QUInt4, "group", 128, None, None, 0.93),
-        (QuantType.QUInt4, "group", 128, HqqConfig(early_stop=False), None, 0.94),
-        (QuantType.QInt8, "channel", None, None, AwqConfig(), 0.94),
+        (QuantType.QUInt8, QuantType.QUInt8, False, False, None, 0.89),
+        (QuantType.QUInt8, QuantType.QUInt8, False, True, SmoothQuantConfig(alpha=0.5), 0.93),
+        (QuantType.QUInt8, QuantType.QUInt8, False, True, AwqConfig(), 0.93),
+        (QuantType.QInt8, QuantType.QInt8, True, True, None, 0.90),
     ],
 )
-def test_quantize_bert_weights_only(
+def test_quantize_bert_weights_inputs_outputs(
     bert_dataset,
     bert_model,
     bert_onnx_dir,
     bert_calibration_data,
     quant_type,
-    strategy,
-    group_size,
-    algorithm,
-    preprocessors,
+    act_dtype,
+    symmetric,
+    is_static,
+    preprocessor,
     expected_accuracy,
 ):
     qconfig = QConfig(
         weights=QWeightArgs(
             dtype=quant_type,
-            symmetric=False,
-            strategy=strategy,
-            group_size=group_size,
-            algorithm=algorithm,
+            symmetric=symmetric,
+            strategy="channel",
         ),
-        preprocessors=[preprocessors] if preprocessors else [],
+        input_activations=QActivationArgs(
+            dtype=act_dtype,
+            is_static=is_static,
+        ),
+        output_activations=QActivationArgs(
+            dtype=act_dtype,
+            is_static=is_static,
+        ),
         calibration_data=bert_calibration_data,
+        preprocessors=[preprocessor] if preprocessor else [],
     )
 
     # Quantize

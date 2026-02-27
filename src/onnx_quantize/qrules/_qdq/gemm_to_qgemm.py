@@ -3,7 +3,7 @@ import onnx_ir as ir
 from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy, QWeightArgs
 from onnx_quantize.qfunctions import QUANT_OPSET
 from onnx_quantize.qrules._common import is_matmul_nbits_compatible, quantize_weights
-from onnx_quantize.qrules._qdq.matmul_to_qmatmul import MatMulToQMatMul
+from onnx_quantize.qrules._qdq.matmul_to_qmatmul import MatMulToQMatMul, _ActivationKind
 
 
 class GemmToQGemm(MatMulToQMatMul):
@@ -72,10 +72,10 @@ class GemmBiasToQGemmBias(GemmToQGemm):
 
         # 2: Get activation quantization parameters
         input_scale, input_zero_point = self._get_activation_qparams(
-            op, node, "input", qconfig.input_activations
+            op, node, _ActivationKind.INPUT, qconfig.input_activations
         )
         out_scale, out_zero_point = self._get_activation_qparams(
-            op, node, "output", qconfig.output_activations
+            op, node, _ActivationKind.OUTPUT, qconfig.output_activations
         )
 
         # 3: Build argument list based on what's needed

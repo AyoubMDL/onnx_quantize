@@ -39,6 +39,8 @@ class SmoothQuantPass(ir.passes.InPlacePass):
         hidden_dim = inputs.shape[-1]
         tensor = np.abs(inputs.reshape(-1, hidden_dim))
         act_scale = np.max(tensor, axis=0)
+        # Clamp to avoid scale=0 (zero-activation channels need no smoothing; scale=1 is correct)
+        act_scale = np.maximum(act_scale, 1e-5)
 
         return act_scale
 

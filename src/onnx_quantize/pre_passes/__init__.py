@@ -23,6 +23,9 @@ def _add_qconfig_to_nodes(ir_model: ir.Model, qconfig: QConfig) -> None:
             # Store the qconfig in the node metadata
             node.meta["qconfig"] = qconfig.model_dump()
 
+            # Remove calibration data from metadata to avoid storing large data in node meta
+            del node.meta["qconfig"]["calibration_data"]
+
 
 def _needs_calibration(qconfig: QConfig) -> bool:
     if qconfig.input_activations and qconfig.input_activations.is_static:
@@ -66,13 +69,16 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     _add_qconfig_to_nodes(model, qconfig)
 
     pre_quantization_passes = []
+    requires_post_calibration = False
     for preprocessor in qconfig.preprocessors:
         if isinstance(preprocessor, SmoothQuantConfig):
+            requires_post_calibration = True
             pre_quantization_passes.append(
                 SmoothQuantPass(alpha=preprocessor.alpha, target_op_types=qconfig.target_op_types)
             )
 
         elif isinstance(preprocessor, AwqConfig):
+            requires_post_calibration = True
             pre_quantization_passes.append(
                 AwqPass(
                     clip_search=preprocessor.clip_search, target_op_types=qconfig.target_op_types
@@ -82,4 +88,13 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     pre_quantization_passes.append(common_passes.CheckerPass(full_check=True))
     pre_quantization_passes = ir.passes.Sequential(*pre_quantization_passes)
 
-    return pre_quantization_passes(model).model
+    model = pre_quantization_passes(model).model
+
+    if requires_post_calibration:
+        logger.info("Re-calibrating the model after pre-processing...")
+        calibrate_model(model, qconfig)
+
+    # Remove calibration data from qconfig to avoid storing large data in node meta
+    qconfig.calibration_data = None
+
+    return model
