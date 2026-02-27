@@ -13,6 +13,25 @@ def _truncated_normal(rng, shape, scale=0.1, clip=2.5):
     return np.clip(x, -clip * scale, clip * scale).astype(np.float32)
 
 
+def _get_multi_input_test_model(rng):
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 20] >
+                test_model (float[N, 32] X, float[N, 32] Z) => (float[N, ?] Y)
+                <float[32, 64] W1, float[64, 128] W2>
+                {
+                    x1 = MatMul(X, W1)
+                    z1 = MatMul(Z, W1)
+                    x2 = Add(x1, z1)
+                    x3 = Relu(x2)
+                    Y = MatMul(x3, W2)
+                }
+            """)
+    W1 = onnx.numpy_helper.from_array(_truncated_normal(rng, (32, 64)), name="W1")
+    W2 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W2")
+    model.graph.initializer.extend([W1, W2])
+    return ir.from_proto(model)
+
+
 def _get_test_model(rng):
     model = onnx.parser.parse_model("""
                 < ir_version: 10, opset_import: ["" : 20] >
@@ -172,3 +191,48 @@ def test_calibrate_model_random_with_batch_size(rng):
         if node.op_type in qconfig.target_op_types:
             assert "input_scale" in node.meta
             assert "input_zero_point" in node.meta
+
+
+def test_calibrate_model_multi_input_random_samples(rng):
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8),
+        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=True),
+    )
+    model = _get_multi_input_test_model(rng)
+    calibrate_model(model, qconfig)
+
+    for node in model.graph:
+        if node.op_type in qconfig.target_op_types:
+            assert "input_scale" in node.meta
+            assert "input_zero_point" in node.meta
+
+
+def test_calibrate_model_multi_input_with_dict_data(rng):
+    calibration_data = {
+        "X": _truncated_normal(rng, (10, 32)),
+        "Z": _truncated_normal(rng, (10, 32)),
+    }
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8),
+        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=True),
+        calibration_data=calibration_data,
+    )
+    model = _get_multi_input_test_model(rng)
+    calibrate_model(model, qconfig)
+
+    for node in model.graph:
+        if node.op_type in qconfig.target_op_types:
+            assert "input_scale" in node.meta
+            assert "input_zero_point" in node.meta
+
+
+def test_calibrate_model_multi_input_raises_with_array(rng):
+    calibration_data = _truncated_normal(rng, (10, 32))
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8),
+        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=True),
+        calibration_data=calibration_data,
+    )
+    model = _get_multi_input_test_model(rng)
+    with pytest.raises(ValueError, match="Calibration data must be a dict"):
+        calibrate_model(model, qconfig)

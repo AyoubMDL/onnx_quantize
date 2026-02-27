@@ -87,18 +87,27 @@ def _augment_model(ir_model: ir.Model, values: set[ir.Value]):
         ir_model.graph.outputs[:] = original_outputs
 
 
+def _generate_random_calibration_data(
+    num_samples: int,
+    session_inputs,  # list[onnxruntime.NodeArg]
+) -> np.ndarray | dict[str, np.ndarray]:
+    logger.info("Generating random calibration data as None was provided.")
+    rng = np.random.default_rng(0)
+
+    def _random_array(input_shape) -> np.ndarray:
+        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in input_shape[1:]]
+        return rng.standard_normal(size=shape).astype(np.float32)
+
+    if len(session_inputs) == 1:
+        return _random_array(session_inputs[0].shape)
+
+    return {inp.name: _random_array(inp.shape) for inp in session_inputs}
+
+
 def _prepare_calibration_data(
-    calibration_data: np.ndarray, batch_size: int, num_samples: int, input_shape: list
+    calibration_data: np.ndarray, batch_size: int, num_samples: int
 ) -> np.ndarray:
     """Prepare calibration data for mini-batch processing."""
-    if calibration_data is None:
-        logger.info("Generating random calibration data as none was provided.")
-        rng = np.random.default_rng(0)
-
-        # Generate random data of shape (num_samples, *input_shape[1:])
-        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in input_shape[1:]]
-        calibration_data = rng.standard_normal(size=shape).astype(np.float32)
-
     total_samples = calibration_data.shape[0]
 
     if num_samples > total_samples:
@@ -123,7 +132,7 @@ def _prepare_calibration_data(
 def _collect_activations(
     ir_model: ir.Model,
     values_to_calibrate: set[ir.Value],
-    calibration_data: np.ndarray,
+    calibration_data: np.ndarray | dict[str, np.ndarray] | None,
     num_samples: int,
     batch_size: int,
 ) -> list[dict[str, np.ndarray]]:
@@ -137,16 +146,30 @@ def _collect_activations(
         # TODO: specify providers
         session = onnxruntime.InferenceSession(tmpfile.name)
 
-        # Prepare calibration data (batching, random samples if needed)
-        calibration_data = _prepare_calibration_data(
-            calibration_data, batch_size, num_samples, session.get_inputs()[0].shape
-        )
+        if calibration_data is None:
+            calibration_data = _generate_random_calibration_data(num_samples, session.get_inputs())
 
-        input_name = session.get_inputs()[0].name
+        if len(session.get_inputs()) > 1:
+            if not isinstance(calibration_data, dict):
+                raise ValueError(
+                    "Calibration data must be a dict mapping input names to arrays "
+                    "for multi-input models."
+                )
+
+        if isinstance(calibration_data, np.ndarray):
+            calibration_data = {session.get_inputs()[0].name: calibration_data}
+
+        batched_inputs = {
+            name: _prepare_calibration_data(data, batch_size, num_samples)
+            for name, data in calibration_data.items()
+        }
+
+        num_batches = len(next(iter(batched_inputs.values())))
         activations = []
 
-        for batch in calibration_data:
-            outputs = session.run(values_names, {input_name: batch})
+        for i in range(num_batches):
+            feed_dict = {name: data[i] for name, data in batched_inputs.items()}
+            outputs = session.run(values_names, feed_dict)
             activations.append(dict(zip(values_names, outputs, strict=True)))
 
     return activations
@@ -214,7 +237,6 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
     Args:
         ir_model (ir.Model): The ONNX IR model to be calibrated.
         qconfig (QConfig): Configuration for quantization parameters.
-        op_types_to_calibrate (set[str]): Set of operation types to calibrate.
     """
     # Get target nodes to calibrate
     nodes_to_calibrate = get_target_nodes(ir_model, qconfig.target_op_types)
@@ -246,9 +268,6 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
         num_samples=num_samples,
         batch_size=batch_size,
     )
-
-    # Remove calibration data from qconfig to avoid storing large data in node meta
-    qconfig.calibration_data = None
 
     # Create calibrator based on configuration
     method = calibrator_params.pop("method")

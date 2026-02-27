@@ -295,8 +295,9 @@ class QConfig(BaseModel):
         format (QFormat | str, optional): Quantization format. Defaults to QFormat.QDQ.
         calibration_params (CalibrationParams | None, optional): Calibration parameters.
             Defaults to CalibrationParams().
-        calibration_data (np.ndarray | None, optional): Calibration data for static quantization.
-            Defaults to None.
+        calibration_data (np.ndarray | dict[str, np.ndarray] | None, optional): Calibration data
+            for static quantization. A single array is mapped to the model's first input; a dict
+            maps input names to arrays (required for multi-input models). Defaults to None.
         preprocessors (Sequence[PreProcessingConfig], optional): Sequence of pre-processing
             configurations to apply before quantization. Defaults to an empty tuple.
     """
@@ -310,7 +311,7 @@ class QConfig(BaseModel):
     # Same calibration data for both weights and activations
     # Needed for activation and also for weights only quantization with GPTQ
     calibration_params: CalibrationParams | None = Field(default_factory=CalibrationParams)
-    calibration_data: np.ndarray | None = None
+    calibration_data: np.ndarray | dict[str, np.ndarray] | None = None
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     # Preprocessors
