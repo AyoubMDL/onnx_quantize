@@ -3,7 +3,7 @@
         "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.fixAll": "explicit"
+            "source.organizeImports.ruff": "explicit",
         }
     },
     "ruff.configuration": "./pyproject.toml",
