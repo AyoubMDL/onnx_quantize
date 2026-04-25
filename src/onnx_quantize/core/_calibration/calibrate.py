@@ -3,6 +3,7 @@ import enum
 import logging
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 import onnx_ir as ir
@@ -140,11 +141,12 @@ def _collect_activations(
     # Augment model graph outputs to collect required activations
     with (
         _augment_model(ir_model, values_to_calibrate) as values_names,
-        tempfile.NamedTemporaryFile() as tmpfile,
+        tempfile.TemporaryDirectory() as tmpdir,
     ):
-        ir.save(ir_model, tmpfile.name)
+        model_path = Path(tmpdir) / "model.onnx"
+        ir.save(ir_model, model_path, external_data="model.data")
         # TODO: specify providers
-        session = onnxruntime.InferenceSession(tmpfile.name)
+        session = onnxruntime.InferenceSession(model_path)
 
         if calibration_data is None:
             calibration_data = _generate_random_calibration_data(num_samples, session.get_inputs())
