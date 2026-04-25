@@ -36,7 +36,7 @@ from onnx_quantize.qrules._common import _resolve_group_size
         # Standard asymmetric unsigned
         (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, False, 10.0 / 255, 0),
         # Standard symmetric unsigned (with zero point != 0)
-        (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, True, 20.0 / 255, 128),
+        (np.array([0.0, 5.0, 10.0]), QuantType.QUInt8, True, 10.0 / 127, 128),
     ],
 )
 @pytest.mark.parametrize("mse", [False, True])

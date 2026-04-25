@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import onnx_ir as ir
+from tqdm import tqdm
 
 from onnx_quantize.core._algorithms.rtn import _rtn_quantize
 from onnx_quantize.core._algorithms.utils import _dequantize_array
@@ -64,7 +65,7 @@ class AwqPass(ir.passes.InPlacePass):
         """Main entry point for the AWQ quantization pass."""
         modified = False
 
-        for node in model.graph:
+        for node in tqdm(model.graph, desc="AWQ Pass", unit="node"):
             modified |= self._apply_awq(node, model)
 
             if self.clip_search:

@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "onnx_quantize"
-version = "0.3.0"
+version = "0.3.0.dev0"
 description = "ONNX Quantization Framework"
 authors = [{ name = "Ayoub Bih", email = "ayoubbih119@gmail.com" }]
 requires-python = ">=3.10"
 
-dependencies = ["onnxscript", "onnxruntime", "pydantic>=2.0"]
+dependencies = ["onnxscript", "onnxruntime", "pydantic>=2.0", "tqdm"]
 
 [project.optional-dependencies]
 test = ["pytest"]

@@ -13,7 +13,7 @@ from onnx_quantize.core._qconfig import QActivationArgs
     [
         (QuantType.QUInt8, QuantType.QUInt8, False, False, None, 0.93),
         (QuantType.QUInt8, QuantType.QUInt8, False, True, SmoothQuantConfig(alpha=0.5), 0.93),
-        (QuantType.QUInt8, QuantType.QUInt8, False, True, AwqConfig(), 0.93),
+        (QuantType.QUInt8, QuantType.QUInt8, False, True, AwqConfig(clip_search=True), 0.93),
         (QuantType.QInt8, QuantType.QInt8, True, True, None, 0.93),
     ],
 )
