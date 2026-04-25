@@ -273,16 +273,24 @@ def _compute_qparams(rmin, rmax, quant_type, is_symmetric, reduce_range, scale_d
     def _compute_qparams_symmetric(rmax, quant_type):
         qmin, qmax = quant_type.qrange(is_symmetric=True, reduce_range=reduce_range)
 
-        # Compute scale
-        scale = (2 * rmax) / (qmax - qmin)
+        # Zero point sits at the midpoint of the quantized range.
+        # For signed types (e.g. INT4): zero = 0. For unsigned (e.g. UINT4): zero = 8.
+        zero = np.round((qmax + qmin) / 2.0)
+
+        # The two sides of zero may have different level counts
+        # (e.g. UINT4: 7 positive levels vs 8 negative levels).
+        # Use the smaller side to prevent overflow during quantization.
+        positive_levels = qmax - zero
+        negative_levels = zero - qmin
+        max_levels = min(positive_levels, negative_levels)
+
+        # Derive scale from the usable levels, not from (qmax - qmin).
+        # The asymmetric formula (2*rmax)/(qmax-qmin) doesn't work here
+        # because the fixed zero point may not split the range evenly.
+        scale = rmax / max_levels
         scale = np.where(scale < np.finfo(rmax.dtype).tiny, 1, scale)
 
-        # Compute zero point
-        # For symmetric quantization, zero point is always the middle of the range
-        # This is because symmetric quantization assumes zero is in the middle of the range
-        # Therefore, it is not always equal to 0, but it is the middle of the quantized range
-        # e.g., for QInt8, the zero point is 0, but for QUInt8, it is 128
-        zero = np.multiply(np.ones(rmax.shape), np.round((qmax + qmin) / 2.0))
+        zero = np.multiply(np.ones(rmax.shape), zero)
         return scale.astype(scale_dtype), np.asarray(zero, dtype=zp_dtype)
 
     if is_symmetric:
