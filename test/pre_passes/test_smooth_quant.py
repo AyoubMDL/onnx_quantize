@@ -1,50 +1,13 @@
-import copy
-
 import numpy as np
 import onnx
 import onnx_ir as ir
 import pytest
-from onnx_ir._cloner import Cloner
 
 from onnx_quantize import QConfig, SmoothQuantConfig
 from onnx_quantize.core._qconfig import _SUPPORTED_OP_TYPES
 from onnx_quantize.pre_passes import _add_qconfig_to_nodes, calibrate_model
 from onnx_quantize.pre_passes.smooth_quant import SmoothQuantPass
 from test.helpers import onnx_forward_on_models
-
-
-@pytest.fixture(scope="module", autouse=True)
-def patch_cloner_for_test():
-    """
-    Patch the Cloner class to perform a deep copy of the meta field.
-    TODO: remove this if it is fixed in onnx_ir.
-    """
-    original_clone = Cloner.clone_node
-
-    def clone_with_meta_copy(self, node):
-        new_node = original_clone(self, node)
-
-        if node.meta:
-            for k, v in node.meta.items():
-                new_node.meta[k] = copy.deepcopy(v)
-
-            new_node.meta._invalid_keys = set(node.meta._invalid_keys)
-
-        # Copy output properties
-        for output, new_output in zip(node.outputs, new_node.outputs, strict=True):
-            if output.meta:
-                for k, v in output.meta.items():
-                    new_output.meta[k] = copy.deepcopy(v)
-
-                new_output.meta._invalid_keys = set(output.meta._invalid_keys)
-        return new_node
-
-    Cloner.clone_node = clone_with_meta_copy
-
-    yield
-
-    # Restore original after all tests in this module complete
-    Cloner.clone_node = original_clone
 
 
 def _preprocess_model(rng, model, calib_data):
@@ -109,7 +72,7 @@ def test_smooth_quant(rng, alpha, model_fn, expected_num_mul):
     model = model_fn(rng, calib_data)
 
     smooth_quant_pass = SmoothQuantPass(alpha=alpha, target_op_types=_SUPPORTED_OP_TYPES)
-    result = smooth_quant_pass(model.clone())
+    result = smooth_quant_pass(model.clone(deep_copy=True))
 
     # Check that the pass modified the model
     assert result.modified
@@ -128,7 +91,7 @@ def test_smooth_quant(rng, alpha, model_fn, expected_num_mul):
     # Check that the input metadata is preserved correctly
     # When calibrating the updated model, we need to have the same activation
     # in node.meta["input"]
-    updated_model_clone = result.model.clone()
+    updated_model_clone = result.model.clone(deep_copy=True)
     calibrate_model(
         updated_model_clone,
         QConfig(preprocessors=[SmoothQuantConfig()], calibration_data=calib_data),
