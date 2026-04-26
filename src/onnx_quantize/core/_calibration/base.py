@@ -3,9 +3,33 @@ __all__ = ["CalibrationMethod", "CalibrationParams"]
 import abc
 import dataclasses
 import enum
+from enum import Enum
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ExecutionProvider(str, Enum):
+    CPU = "CPUExecutionProvider"
+    CUDA = "CUDAExecutionProvider"
+
+    @classmethod
+    def from_alias(cls, value: str) -> "ExecutionProvider":
+        aliases = {
+            "cpu": cls.CPU,
+            "cuda": cls.CUDA,
+            "gpu": cls.CUDA,
+        }
+        key = value.lower()
+        if key in aliases:
+            return aliases[key]
+        try:
+            return cls(value)
+        except ValueError:
+            valid = sorted({*aliases.keys(), *(p.value for p in cls)})
+            raise ValueError(  # noqa: B904
+                f"Invalid execution provider '{value}'. Valid values are: {valid}"
+            )
 
 
 class CalibrationMethod(enum.Enum):
@@ -26,6 +50,11 @@ class CalibrationParams(BaseModel):
             Defaults to 10.
         momentum (float, optional): Momentum for moving average calculations.
             Must be in the range [0, 1). Defaults to 0.0.
+        provider (ExecutionProvider | str, optional): ONNX Runtime execution
+            provider used to run the model during calibration. Accepts the full
+            provider name (e.g. ``"CPUExecutionProvider"``), a short alias
+            (``"cpu"``, ``"cuda"``, ``"gpu"``), or an ``ExecutionProvider``
+            member. Defaults to ``ExecutionProvider.CPU``.
     """
 
     # Forbid extra fields
@@ -35,6 +64,7 @@ class CalibrationParams(BaseModel):
     num_samples: int = 100
     batch_size: int = 10
     momentum: float = 0.0
+    provider: ExecutionProvider | str = Field(default=ExecutionProvider.CPU)
 
     @field_validator("method", mode="before")
     def validate_method(cls, value) -> CalibrationMethod:
@@ -46,6 +76,12 @@ class CalibrationParams(BaseModel):
                 raise ValueError(  # noqa: B904
                     f"Invalid calibration method '{value}'. Valid methods are: {valid_methods}"
                 )
+        return value
+
+    @field_validator("provider", mode="before")
+    def validate_provider(cls, value) -> ExecutionProvider:
+        if isinstance(value, str):
+            return ExecutionProvider.from_alias(value)
         return value
 
     @field_validator("momentum", mode="after")

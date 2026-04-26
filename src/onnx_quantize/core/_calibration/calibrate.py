@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import onnx_ir as ir
-import onnxruntime
 
 from onnx_quantize.core._algorithms.utils import _compute_qparams
 from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
@@ -19,6 +18,11 @@ from onnx_quantize.core._qconfig import (
     SmoothQuantConfig,
 )
 
+
+try:
+    import onnxruntime
+except ImportError:
+    onnxruntime = None
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +134,47 @@ def _prepare_calibration_data(
     return calibration_data
 
 
+def _require_onnxruntime() -> None:
+    if onnxruntime is None:
+        raise ImportError(
+            "onnxruntime is required for calibration but is not installed. "
+            "Install one of: `pip install onnx_quantize[cpu]` (CPU) or "
+            "`pip install onnx_quantize[gpu]` (GPU)."
+        )
+
+
+def _warn_if_provider_unavailable(provider: ExecutionProvider) -> None:
+    """Warn if the requested execution provider is not available in onnxruntime."""
+    available = onnxruntime.get_available_providers()
+    if provider in available:
+        return
+
+    msg = (
+        f"Requested execution provider '{provider}' is not available "
+        f"(available: {available}). onnxruntime will silently fall back to "
+        f"'CPUExecutionProvider', which may be much slower."
+    )
+    if provider is ExecutionProvider.CUDA:
+        msg += (
+            " If this machine has a GPU, uninstall 'onnxruntime' and install "
+            "'onnxruntime-gpu' instead (e.g. `pip uninstall onnxruntime && "
+            "pip install onnxruntime-gpu`)."
+        )
+    logger.warning(msg)
+
+
 def _collect_activations(
     ir_model: ir.Model,
     values_to_calibrate: set[ir.Value],
     calibration_data: np.ndarray | dict[str, np.ndarray] | None,
     num_samples: int,
     batch_size: int,
+    provider: ExecutionProvider,
 ) -> list[dict[str, np.ndarray]]:
     """Collect interm activation values from the model during inference."""
+    _require_onnxruntime()
+    _warn_if_provider_unavailable(provider)
+
     # Augment model graph outputs to collect required activations
     with (
         _augment_model(ir_model, values_to_calibrate) as values_names,
@@ -145,8 +182,7 @@ def _collect_activations(
     ):
         model_path = Path(tmpdir) / "model.onnx"
         ir.save(ir_model, model_path, external_data="model.data")
-        # TODO: specify providers
-        session = onnxruntime.InferenceSession(model_path)
+        session = onnxruntime.InferenceSession(model_path, providers=(provider,))
 
         if calibration_data is None:
             calibration_data = _generate_random_calibration_data(num_samples, session.get_inputs())
@@ -262,6 +298,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
     calibrator_params = qconfig.calibration_params.model_dump()
     batch_size = calibrator_params.pop("batch_size")
     num_samples = calibrator_params.pop("num_samples")
+    provider = ExecutionProvider(calibrator_params.pop("provider"))
 
     activations = _collect_activations(
         ir_model,
@@ -269,6 +306,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
         calibration_data=qconfig.calibration_data,
         num_samples=num_samples,
         batch_size=batch_size,
+        provider=provider,
     )
 
     # Create calibrator based on configuration
