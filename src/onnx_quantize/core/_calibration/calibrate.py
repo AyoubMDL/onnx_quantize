@@ -5,11 +5,13 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
+import ml_dtypes
 import numpy as np
 import onnx_ir as ir
-import onnxruntime
+from tqdm import tqdm
 
 from onnx_quantize.core._algorithms.utils import _compute_qparams
+from onnx_quantize.core._calibration.base import ExecutionProvider
 from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
 from onnx_quantize.core._qconfig import (
     AwqConfig,
@@ -20,7 +22,26 @@ from onnx_quantize.core._qconfig import (
 )
 
 
+try:
+    import onnxruntime
+except ImportError:
+    onnxruntime = None
+
 logger = logging.getLogger(__name__)
+
+_ORT_TYPE_TO_NUMPY = {
+    "tensor(float)": np.float32,
+    "tensor(float16)": np.float16,
+    "tensor(bfloat16)": ml_dtypes.bfloat16,
+    "tensor(int8)": np.int8,
+    "tensor(int16)": np.int16,
+    "tensor(int32)": np.int32,
+    "tensor(int64)": np.int64,
+    "tensor(uint8)": np.uint8,
+    "tensor(uint16)": np.uint16,
+    "tensor(uint32)": np.uint32,
+    "tensor(uint64)": np.uint64,
+}
 
 
 class _ActivationKind(enum.Enum):
@@ -95,14 +116,20 @@ def _generate_random_calibration_data(
     logger.info("Generating random calibration data as None was provided.")
     rng = np.random.default_rng(0)
 
-    def _random_array(input_shape) -> np.ndarray:
-        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in input_shape[1:]]
-        return rng.standard_normal(size=shape).astype(np.float32)
+    def _random_array(inp) -> np.ndarray:
+        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in inp.shape[1:]]
+        dtype = _ORT_TYPE_TO_NUMPY.get(inp.type, np.float32)
+        if np.issubdtype(dtype, np.integer):
+            # Conservative range — valid as token IDs for typical vocab sizes
+            # and as attention-mask values. Real calibration data should be
+            # passed for meaningful results.
+            return rng.integers(0, 100, size=shape, dtype=dtype)
+        return rng.standard_normal(size=shape).astype(dtype)
 
     if len(session_inputs) == 1:
-        return _random_array(session_inputs[0].shape)
+        return _random_array(session_inputs[0])
 
-    return {inp.name: _random_array(inp.shape) for inp in session_inputs}
+    return {inp.name: _random_array(inp) for inp in session_inputs}
 
 
 def _prepare_calibration_data(
@@ -130,14 +157,47 @@ def _prepare_calibration_data(
     return calibration_data
 
 
+def _require_onnxruntime() -> None:
+    if onnxruntime is None:
+        raise ImportError(
+            "onnxruntime is required for calibration but is not installed. "
+            "Install one of: `pip install onnx_quantize[cpu]` (CPU) or "
+            "`pip install onnx_quantize[gpu]` (GPU)."
+        )
+
+
+def _warn_if_provider_unavailable(provider: ExecutionProvider) -> None:
+    """Warn if the requested execution provider is not available in onnxruntime."""
+    available = onnxruntime.get_available_providers()
+    if provider in available:
+        return
+
+    msg = (
+        f"Requested execution provider '{provider}' is not available "
+        f"(available: {available}). onnxruntime will silently fall back to "
+        f"'CPUExecutionProvider', which may be much slower."
+    )
+    if provider is ExecutionProvider.CUDA:
+        msg += (
+            " If this machine has a GPU, uninstall 'onnxruntime' and install "
+            "'onnxruntime-gpu' instead (e.g. `pip uninstall onnxruntime && "
+            "pip install onnxruntime-gpu`)."
+        )
+    logger.warning(msg)
+
+
 def _collect_activations(
     ir_model: ir.Model,
     values_to_calibrate: set[ir.Value],
     calibration_data: np.ndarray | dict[str, np.ndarray] | None,
     num_samples: int,
     batch_size: int,
+    provider: ExecutionProvider,
 ) -> list[dict[str, np.ndarray]]:
     """Collect interm activation values from the model during inference."""
+    _require_onnxruntime()
+    _warn_if_provider_unavailable(provider)
+
     # Augment model graph outputs to collect required activations
     with (
         _augment_model(ir_model, values_to_calibrate) as values_names,
@@ -145,8 +205,7 @@ def _collect_activations(
     ):
         model_path = Path(tmpdir) / "model.onnx"
         ir.save(ir_model, model_path, external_data="model.data")
-        # TODO: specify providers
-        session = onnxruntime.InferenceSession(model_path)
+        session = onnxruntime.InferenceSession(model_path, providers=(provider,))
 
         if calibration_data is None:
             calibration_data = _generate_random_calibration_data(num_samples, session.get_inputs())
@@ -169,7 +228,7 @@ def _collect_activations(
         num_batches = len(next(iter(batched_inputs.values())))
         activations = []
 
-        for i in range(num_batches):
+        for i in tqdm(range(num_batches), desc="Calibrating"):
             feed_dict = {name: data[i] for name, data in batched_inputs.items()}
             outputs = session.run(values_names, feed_dict)
             activations.append(dict(zip(values_names, outputs, strict=True)))
@@ -262,6 +321,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
     calibrator_params = qconfig.calibration_params.model_dump()
     batch_size = calibrator_params.pop("batch_size")
     num_samples = calibrator_params.pop("num_samples")
+    provider = ExecutionProvider(calibrator_params.pop("provider"))
 
     activations = _collect_activations(
         ir_model,
@@ -269,6 +329,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
         calibration_data=qconfig.calibration_data,
         num_samples=num_samples,
         batch_size=batch_size,
+        provider=provider,
     )
 
     # Create calibrator based on configuration
