@@ -236,3 +236,31 @@ def test_calibrate_model_multi_input_raises_with_array(rng):
     model = _get_multi_input_test_model(rng)
     with pytest.raises(ValueError, match="Calibration data must be a dict"):
         calibrate_model(model, qconfig)
+
+
+def test_calibrate_model_random_samples_int32_input(rng):
+    """LLM-style model: int32 token IDs -> Gather (embedding) -> MatMul."""
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 20] >
+                test_model (int32[N, S] input_ids) => (float[N, S, ?] Y)
+                <float[100, 64] W_embed, float[64, 128] W1>
+                {
+                    x_emb = Gather(W_embed, input_ids)
+                    Y = MatMul(x_emb, W1)
+                }
+            """)
+    W_embed = onnx.numpy_helper.from_array(_truncated_normal(rng, (100, 64)), name="W_embed")
+    W1 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W1")
+    model.graph.initializer.extend([W_embed, W1])
+    ir_model = ir.from_proto(model)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8),
+        input_activations=QActivationArgs(dtype=QuantType.QUInt8, is_static=True),
+    )
+    calibrate_model(ir_model, qconfig)
+
+    for node in ir_model.graph:
+        if node.op_type in qconfig.target_op_types:
+            assert "input_scale" in node.meta
+            assert "input_zero_point" in node.meta

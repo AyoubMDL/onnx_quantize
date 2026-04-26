@@ -5,10 +5,13 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
+import ml_dtypes
 import numpy as np
 import onnx_ir as ir
+from tqdm import tqdm
 
 from onnx_quantize.core._algorithms.utils import _compute_qparams
+from onnx_quantize.core._calibration.base import ExecutionProvider
 from onnx_quantize.core._calibration.factory import Calibrator, get_calibrator
 from onnx_quantize.core._qconfig import (
     AwqConfig,
@@ -25,6 +28,20 @@ except ImportError:
     onnxruntime = None
 
 logger = logging.getLogger(__name__)
+
+_ORT_TYPE_TO_NUMPY = {
+    "tensor(float)": np.float32,
+    "tensor(float16)": np.float16,
+    "tensor(bfloat16)": ml_dtypes.bfloat16,
+    "tensor(int8)": np.int8,
+    "tensor(int16)": np.int16,
+    "tensor(int32)": np.int32,
+    "tensor(int64)": np.int64,
+    "tensor(uint8)": np.uint8,
+    "tensor(uint16)": np.uint16,
+    "tensor(uint32)": np.uint32,
+    "tensor(uint64)": np.uint64,
+}
 
 
 class _ActivationKind(enum.Enum):
@@ -99,14 +116,20 @@ def _generate_random_calibration_data(
     logger.info("Generating random calibration data as None was provided.")
     rng = np.random.default_rng(0)
 
-    def _random_array(input_shape) -> np.ndarray:
-        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in input_shape[1:]]
-        return rng.standard_normal(size=shape).astype(np.float32)
+    def _random_array(inp) -> np.ndarray:
+        shape = [num_samples] + [d if isinstance(d, int) else 1 for d in inp.shape[1:]]
+        dtype = _ORT_TYPE_TO_NUMPY.get(inp.type, np.float32)
+        if np.issubdtype(dtype, np.integer):
+            # Conservative range — valid as token IDs for typical vocab sizes
+            # and as attention-mask values. Real calibration data should be
+            # passed for meaningful results.
+            return rng.integers(0, 100, size=shape, dtype=dtype)
+        return rng.standard_normal(size=shape).astype(dtype)
 
     if len(session_inputs) == 1:
-        return _random_array(session_inputs[0].shape)
+        return _random_array(session_inputs[0])
 
-    return {inp.name: _random_array(inp.shape) for inp in session_inputs}
+    return {inp.name: _random_array(inp) for inp in session_inputs}
 
 
 def _prepare_calibration_data(
@@ -205,7 +228,7 @@ def _collect_activations(
         num_batches = len(next(iter(batched_inputs.values())))
         activations = []
 
-        for i in range(num_batches):
+        for i in tqdm(range(num_batches), desc="Calibrating"):
             feed_dict = {name: data[i] for name, data in batched_inputs.items()}
             outputs = session.run(values_names, feed_dict)
             activations.append(dict(zip(values_names, outputs, strict=True)))
