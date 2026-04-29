@@ -54,7 +54,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests (Nightly)
-    if: github.event_name == 'schedule'
+    # if: github.event_name == 'schedule'
     needs: [lint]
     runs-on: ubuntu-latest
     strategy:
