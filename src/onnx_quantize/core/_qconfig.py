@@ -281,7 +281,7 @@ class QActivationArgs(_BaseArgs):
 
 
 class QConfig(BaseModel):
-    """QConfig is the main configuration class handling all the quantization parameters.
+    r"""QConfig is the main configuration class handling all the quantization parameters.
 
     Args:
         target_op_types (Sequence[str], optional): Sequence of target operator types to quantize.
@@ -300,6 +300,9 @@ class QConfig(BaseModel):
             maps input names to arrays (required for multi-input models). Defaults to None.
         preprocessors (Sequence[PreProcessingConfig], optional): Sequence of pre-processing
             configurations to apply before quantization. Defaults to an empty tuple.
+        ignore (Sequence[str], optional): Regex patterns matched against node names with
+            ``re.search`` (e.g. "lm_head", "embed", r"^layers\.0\."). Matching nodes are
+            skipped from quantization. Defaults to an empty tuple.
     """
 
     target_op_types: Sequence[str] = Field(default_factory=lambda: _SUPPORTED_OP_TYPES)
@@ -317,10 +320,21 @@ class QConfig(BaseModel):
     # Preprocessors
     preprocessors: Sequence[PreProcessingConfig] = Field(default_factory=tuple)
 
+    # Patterns of node names to skip from quantization
+    ignore: Sequence[str] = Field(default_factory=tuple)
+
     @field_validator("target_op_types", mode="before")
     def validate_target_op_types(cls, value) -> Sequence[str]:
         # Remove duplicates and convert to tuple for immutability
         return tuple(sorted(set(value)))
+
+    @field_validator("ignore", mode="before")
+    def validate_ignore(cls, value) -> Sequence[str]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            value = (value,)
+        return tuple(value)
 
     @field_validator("format", mode="before")
     def validate_format(cls, value) -> QFormat:

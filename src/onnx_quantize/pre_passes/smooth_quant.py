@@ -71,6 +71,9 @@ class SmoothQuantPass(ir.passes.InPlacePass):
         if ir.convenience.get_const_tensor(node.inputs[1]) is None:
             return False
 
+        if node.meta.get("qconfig") is None:
+            return False
+
         qconfig = QConfig(**node.meta["qconfig"])
 
         if not qconfig.preprocessors:
