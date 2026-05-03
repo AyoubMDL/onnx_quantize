@@ -32,9 +32,12 @@ class MatMulToQMatMul(QRewriter):
     def pattern(self, op, x, w):
         return op.MatMul(x, w, _outputs=["out"])
 
-    def check(self, context, w, **_):
+    def check(self, context, w, out, **_):
         del context
         check_result = onnxscript.rewriter.MatchResult()
+
+        if out.producer().meta.get("qconfig") is None:
+            return check_result.fail("Node has no quantization config (ignored).")
 
         if ir.convenience.get_const_tensor(w) is None:
             return check_result.fail("Weight is not a constant tensor.")

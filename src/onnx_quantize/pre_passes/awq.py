@@ -83,6 +83,7 @@ class AwqPass(ir.passes.InPlacePass):
             lambda: node.domain != "",
             lambda: ir.convenience.get_const_tensor(node.inputs[1]) is None,
             lambda: node.attributes.get("transB", ir.AttrInt64("transB", 0)).as_int() != 0,
+            lambda: node.meta.get("qconfig") is None,
         ]
 
         return not any(check() for check in constrains)

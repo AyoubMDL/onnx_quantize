@@ -249,6 +249,23 @@ class TestQConfig:
         with pytest.raises(ValueError, match="Unsupported operator type.*Conv"):
             QConfig(weights=QWeightArgs(), target_op_types=["MatMul", "Conv"])
 
+    def test_qconfig_ignore_default(self):
+        config = QConfig(weights=QWeightArgs())
+        assert config.ignore == ()
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (["lm_head", "embed"], ("lm_head", "embed")),
+            (("lm_head",), ("lm_head",)),
+            ("lm_head", ("lm_head",)),
+            (None, ()),
+        ],
+    )
+    def test_qconfig_ignore_normalization(self, value, expected):
+        config = QConfig(weights=QWeightArgs(), ignore=value)
+        assert config.ignore == expected
+
 
 class TestQWeightArgs:
     def test_qweight_args_invalid_clip_ratio(self):

@@ -3,7 +3,15 @@ import onnx
 import onnx_ir as ir
 import pytest
 
-from onnx_quantize import AwqConfig, GPTQConfig, HqqConfig, QuantType, SmoothQuantConfig, quantize
+from onnx_quantize import (
+    AwqConfig,
+    GPTQConfig,
+    HqqConfig,
+    QFormat,
+    QuantType,
+    SmoothQuantConfig,
+    quantize,
+)
 from onnx_quantize.core._qconfig import QActivationArgs, QConfig, QWeightArgs
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
 from test.helpers import onnx_forward_on_models
@@ -442,6 +450,57 @@ def test_quantize_smooth_quant(rng):
     # For the moment, we only check the inference
     qmodel = quantize(model, qconfig)
     onnx_forward_on_models(qmodel, samples={"X": _truncated_normal(rng, (2, 32))})
+
+
+@pytest.mark.parametrize("qformat", [QFormat.QDQ, QFormat.QLINEAR])
+def test_quantize_ignore_skips_matching_nodes(rng, qformat):
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 21] >
+                test_model (float[N, 32] X) => (float [N, ?] Y)
+                <float[32, 64] W1, float[64, 128] W2>
+                {
+                    x1 = MatMul(X, W1)
+                    Y = MatMul(x1, W2)
+                }
+            """)
+    W1 = onnx.numpy_helper.from_array(_truncated_normal(rng, (32, 64)), name="W1")
+    W2 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W2")
+    model.graph.initializer.extend([W1, W2])
+    model.graph.node[0].name = "lm_head.MatMul"
+    model.graph.node[1].name = "layers.0.fc.MatMul"
+    onnx.checker.check_model(model, full_check=True)
+
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8, strategy="tensor", symmetric=True),
+        input_activations=QActivationArgs(is_static=True),
+        output_activations=QActivationArgs(is_static=True),
+        ignore=["lm_head"],
+        format=qformat,
+    )
+
+    qmodel = quantize(model, qconfig)
+
+    # Check that only one node was quantized
+    domains_by_name = {n.name: n.domain for n in qmodel.graph.node}
+
+    # Ignored node stays in default domain; the other becomes a quantized op
+    assert domains_by_name.get("lm_head.MatMul") == ""
+    assert any(d in {QUANT_OPSET.domain, MS_OPSET.domain} for d in domains_by_name.values())
+
+
+def test_quantize_ignore_all_leaves_model_unchanged(rng):
+    model = _get_matmul_model(rng)
+    for i, node in enumerate(model.graph.node):
+        node.name = f"layer{i}"
+
+    qconfig = QConfig(
+        weights=QWeightArgs(dtype=QuantType.QUInt8, strategy="tensor", symmetric=True),
+        ignore=[r"^layer\d+$"],
+    )
+
+    qmodel = quantize(model, qconfig)
+
+    assert all(node.domain == "" for node in qmodel.graph.node)
 
 
 @pytest.mark.parametrize("target_op_types", [("Gemm",), ("MatMul",)])

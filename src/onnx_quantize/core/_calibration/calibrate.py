@@ -1,7 +1,9 @@
 import collections
 import enum
 import logging
+import re
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -49,19 +51,35 @@ class _ActivationKind(enum.Enum):
     OUTPUT = "output"
 
 
-def get_target_nodes(ir_model: ir.Model, op_types_to_calibrate: set[str]) -> set[ir.Node]:
+def get_target_nodes(
+    ir_model: ir.Model,
+    op_types_to_calibrate: set[str],
+    ignore_patterns: Sequence[str] = (),
+) -> set[ir.Node]:
     """Returns a set of nodes to quantize.
 
     Args:
         ir_model (ir.Model): The ONNX IR model to analyze.
         op_types_to_calibrate (set[str]): Set of operation types to calibrate.
+        ignore_patterns (Sequence[str], optional): Regex patterns matched against
+            ``node.name`` with :func:`re.search`. Matching nodes are excluded.
+            Defaults to ``()``.
 
     Returns:
         set[ir.Node]: A set of nodes to quantize.
     """
+    compiled_ignores = [re.compile(p) for p in ignore_patterns]
+
+    def is_ignored(name: str | None) -> bool:
+        if not name or not compiled_ignores:
+            return False
+        return any(p.search(name) for p in compiled_ignores)
 
     def is_valid(node: ir.Node) -> bool:
         if node.op_type not in op_types_to_calibrate:
+            return False
+
+        if is_ignored(node.name):
             return False
 
         # Weight must be constant
@@ -300,7 +318,7 @@ def calibrate_model(ir_model: ir.Model, qconfig: QConfig):
         qconfig (QConfig): Configuration for quantization parameters.
     """
     # Get target nodes to calibrate
-    nodes_to_calibrate = get_target_nodes(ir_model, qconfig.target_op_types)
+    nodes_to_calibrate = get_target_nodes(ir_model, qconfig.target_op_types, qconfig.ignore)
 
     # Identify which activations to calibrate
     calibrate_inputs = qconfig.input_activations is not None and qconfig.input_activations.is_static

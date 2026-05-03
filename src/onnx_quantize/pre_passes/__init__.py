@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _add_qconfig_to_nodes(ir_model: ir.Model, qconfig: QConfig) -> None:
-    nodes = get_target_nodes(ir_model, qconfig.target_op_types)
+    nodes = get_target_nodes(ir_model, qconfig.target_op_types, qconfig.ignore)
 
     for node in ir_model.graph:
         if node in nodes:

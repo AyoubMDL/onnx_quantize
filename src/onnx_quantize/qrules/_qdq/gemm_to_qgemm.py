@@ -13,7 +13,7 @@ class GemmToQGemm(MatMulToQMatMul):
         return op.Gemm(x, w, transB=0, _outputs=["out"])
 
     def check(self, context, w, out, **_):
-        check_result = super().check(context, w)
+        check_result = super().check(context, w, out)
         if not check_result:
             return check_result
 
