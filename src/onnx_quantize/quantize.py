@@ -67,8 +67,12 @@ def quantize(model: onnx.ModelProto | ir.Model, qconfig: QConfig) -> onnx.ModelP
     # Add quantization functions to the model
     model.functions.update(get_qfunctions())
 
+    # Apply post passes
     # Remove unused functions
     ir_passes.RemoveUnusedFunctionsPass()(model)
+
+    # Deduplicate weights (they were duplicated in pre-passes)
+    ir_passes.DeduplicateInitializersPass(size_limit=1e9)(model)
 
     if is_proto:
         model = ir.to_proto(model)

@@ -8,6 +8,7 @@ from onnxscript.rewriter.rules.common import matmul_add_to_gemm_rule
 from onnx_quantize.core._calibration.calibrate import calibrate_model, get_target_nodes
 from onnx_quantize.core._qconfig import AwqConfig, GPTQConfig, QConfig, SmoothQuantConfig
 from onnx_quantize.pre_passes.awq import AwqPass
+from onnx_quantize.pre_passes.duplicate_initializer import DuplicateInitializersPass
 from onnx_quantize.pre_passes.smooth_quant import SmoothQuantPass
 from onnx_quantize.pre_passes.standarize_gemm import standarize_gemm_rules
 
@@ -56,6 +57,7 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     standard_passes = ir.passes.Sequential(
         # TODO: maybe add custom naming
         common_passes.NameFixPass(),
+        DuplicateInitializersPass(),
         onnxscript.rewriter.RewritePass([matmul_add_to_gemm_rule, *standarize_gemm_rules]),
     )
 
