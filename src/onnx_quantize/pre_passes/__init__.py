@@ -57,6 +57,7 @@ def apply_pre_passes(model: ir.Model, qconfig: QConfig) -> ir.Model:
     standard_passes = ir.passes.Sequential(
         # TODO: maybe add custom naming
         common_passes.NameFixPass(),
+        # TODO: Maybe duplicate when applying the qrules directly
         DuplicateInitializersPass(),
         onnxscript.rewriter.RewritePass([matmul_add_to_gemm_rule, *standarize_gemm_rules]),
     )

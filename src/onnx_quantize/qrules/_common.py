@@ -153,23 +153,28 @@ def _prepare_for_matmul_nbits(
 
     # For the case where num_blocks = 1, we don't pack the zero points
     if num_bits == 4 and num_blocks > 1 and qconfig.weights.zp_dtype != w_scale.dtype:
-        # For 4-bit case, the default zeros is 0x8. So it is 0x88 = 136
-        # if we fill lower/higher 4 bits with 0x8.
-        packed_zp = np.full((w_zero_point.shape[0] + 1) // 2, 136, dtype=np.uint8)
+        # Pack per row so each output channel's zero points stay contiguous,
+        # padding to an even count with the default 0x8 nibble when num_blocks is odd.
+        # Example
+        # shape (4, 5):
+        # [[a0, a1, a2, a3, a4],
+        #  [b0, b1, b2, b3, b4],
+        #  [c0, c1, c2, c3, c4],
+        #  [d0, d1, d2, d3, d4]]
+        zp = w_zero_point.reshape(out_channels, num_blocks).astype(np.uint8)
+        if num_blocks % 2 == 1:
+            # shape (4, 6):
+            # [[a0, a1, a2, a3, a4, 0x8],
+            #  [b0, b1, b2, b3, b4, 0x8],
+            #  ...]
+            pad = np.full((out_channels, 1), 0x8, dtype=np.uint8)
+            zp = np.concatenate([zp, pad], axis=1)
 
-        # create an index array
-        idx = np.arange(w_zero_point.shape[0] // num_blocks * num_blocks).reshape(-1)
-
-        # separate odd and even indices
-        even_idx = idx[::2]
-        odd_idx = idx[1::2]
-        # vectorized operation for even and odd indices
-        packed_zp[even_idx // 2] = (packed_zp[even_idx // 2] & 0xF0) | w_zero_point[
-            even_idx
-        ].ravel()
-        packed_zp[odd_idx // 2] = (packed_zp[odd_idx // 2] & 0x0F) | (
-            w_zero_point[odd_idx].ravel() << 4
-        )
+        # packed_zp shape (4, 3):
+        # [[a1|a0, a3|a2, 0x8|a4],
+        #  [b1|b0, b3|b2, 0x8|b4],
+        #  ...]
+        packed_zp = (zp[:, ::2] & 0x0F) | ((zp[:, 1::2] & 0x0F) << 4)
 
     zp_dtype = np.uint8 if qconfig.weights.zp_dtype != w_scale.dtype else qconfig.weights.zp_dtype
     packed_zp = np.reshape(packed_zp, (out_channels, -1)).astype(zp_dtype)
