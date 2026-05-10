@@ -116,9 +116,12 @@ def _augment_model(ir_model: ir.Model, values: set[ir.Value]):
     """Temporarily augment model outputs to include specified values."""
     original_outputs = list(ir_model.graph.outputs)
 
+    # Rebuild all outputs
+    # This beneficial when we dont need the last output (e.g. lm_head)
+    ir_model.graph.outputs.clear()
     for v in values:
-        if v not in ir_model.graph.outputs:
-            ir_model.graph.outputs.append(v)
+        # if v not in ir_model.graph.outputs:
+        ir_model.graph.outputs.append(v)
 
     try:
         yield [v.name for v in ir_model.graph.outputs]
