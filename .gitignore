@@ -8,6 +8,7 @@ __pycache__/
 
 # ONNX files
 *.onnx
+*.data
 
 # Distribution / packaging
 .Python

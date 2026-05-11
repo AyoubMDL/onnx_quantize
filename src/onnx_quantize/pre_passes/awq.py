@@ -110,6 +110,13 @@ class AwqPass(ir.passes.InPlacePass):
         best_scale = None
         n_grid = 20
 
+        # Reusable buffers across grid iterations
+        weights_buf = np.empty(
+            original_weights.shape,
+            dtype=np.result_type(original_weights.dtype, np.float32),
+        )
+        out_buf = np.empty_like(original_outputs)
+
         for ratio in range(n_grid):
             ratio = ratio * 1 / n_grid
 
@@ -118,12 +125,13 @@ class AwqPass(ir.passes.InPlacePass):
                 np.power(act_scale, ratio) / np.power(weights_scale, (1 - ratio)), 1e-4, None
             )
             scale = scale / np.sqrt(np.max(scale) * np.min(scale))
+            scale_col = scale.reshape(-1, 1)
 
-            weights = original_weights * scale.reshape(-1, 1)
+            np.multiply(original_weights, scale_col, out=weights_buf)
 
             # 4. Fake quantize weights
             qweights, qscale, qzp = _rtn_quantize(
-                weights,
+                weights_buf,
                 quant_type=qconfig.weights.dtype,
                 strategy=qconfig.weights.strategy,
                 group_size=qconfig.weights.group_size,
@@ -142,9 +150,11 @@ class AwqPass(ir.passes.InPlacePass):
                 strategy=qconfig.weights.strategy,
                 group_size=qconfig.weights.group_size,
             )
-            q_weight = qweights / scale.reshape(-1, 1)
-            out = np.matmul(node.meta["input"], q_weight)
-            loss = np.mean(np.power((original_outputs - out), 2))
+            qweights /= scale_col
+            np.matmul(node.meta["input"], qweights, out=out_buf)
+            np.subtract(original_outputs, out_buf, out=out_buf)
+            diff = out_buf.ravel()
+            loss = float(diff @ diff) / diff.size
 
             if loss < best_error:
                 best_error = loss
@@ -184,6 +194,9 @@ class AwqPass(ir.passes.InPlacePass):
         best_error = np.inf
         best_ratio = 1
 
+        # Reusable buffer across grid iterations
+        out_buf = np.empty_like(original_outputs)
+
         for i_s in range(10):
             ratio = 1 - i_s / 100
 
@@ -208,9 +221,10 @@ class AwqPass(ir.passes.InPlacePass):
                 group_size=qconfig.weights.group_size,
             )
 
-            current_outputs = np.matmul(inputs, qweights)
-
-            loss = np.mean(np.power((original_outputs - current_outputs), 2))
+            np.matmul(inputs, qweights, out=out_buf)
+            np.subtract(original_outputs, out_buf, out=out_buf)
+            diff = out_buf.ravel()
+            loss = float(diff @ diff) / diff.size
 
             if loss < best_error:
                 best_error = loss
