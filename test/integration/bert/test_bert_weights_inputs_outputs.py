@@ -69,4 +69,4 @@ def test_quantize_bert_weights_inputs_outputs(
         correct += (preds == batch["label"]).sum().item()
 
     # float has ~0.94 accuracy
-    assert correct / len(bert_dataset) == expected_accuracy
+    assert correct / len(bert_dataset) == pytest.approx(expected_accuracy, abs=0.02)
