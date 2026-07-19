@@ -1,12 +1,36 @@
+from __future__ import annotations
+
 import logging
+from typing import Literal
 
 import numpy as np
 import onnx_ir as ir
 
-from onnx_quantize.core._qconfig import QConfig
+from onnx_quantize.core._qconfig import (
+    PreProcessingConfig,
+    QConfig,
+    register_preprocessing_config,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+@register_preprocessing_config
+class SmoothQuantConfig(PreProcessingConfig):
+    """SmoothQuantConfig is the configuration class handling all the SmoothQuant parameters.
+
+    Args:
+        alpha (float, optional): The alpha parameter for SmoothQuant. Defaults to 0.5.
+            This parameter controls how much difficulty we want to migrate from
+            input_tensors to weights.
+    """
+
+    preprocessing_type: Literal["smooth_quant"] = "smooth_quant"
+    alpha: float = 0.5
+
+    def build_pass(self, qconfig: QConfig) -> ir.passes.InPlacePass:
+        return SmoothQuantPass(alpha=self.alpha, target_op_types=qconfig.target_op_types)
 
 
 # TODO: add folding of mul nodes

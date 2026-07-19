@@ -4,8 +4,15 @@ import torch
 from optimum.onnxruntime import ORTModelForSequenceClassification
 from tqdm import tqdm
 
-from onnx_quantize import QConfig, QuantType, QWeightArgs, quantize
-from onnx_quantize.core._qconfig import AwqConfig, QActivationArgs, SmoothQuantConfig
+from onnx_quantize import (
+    AwqConfig,
+    QActivationArgs,
+    QConfig,
+    QuantType,
+    QWeightArgs,
+    SmoothQuantConfig,
+    quantize,
+)
 
 
 @pytest.mark.parametrize(

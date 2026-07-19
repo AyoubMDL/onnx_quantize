@@ -5,4 +5,6 @@ from onnx_quantize.core._algorithms.rtn import RTNConfig
 from onnx_quantize.core._calibration.base import *
 from onnx_quantize.core._dtypes import *
 from onnx_quantize.core._qconfig import *
+from onnx_quantize.pre_passes.awq import AwqConfig
+from onnx_quantize.pre_passes.smooth_quant import SmoothQuantConfig
 from onnx_quantize.quantize import *

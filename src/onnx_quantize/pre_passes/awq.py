@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+from typing import Literal
 
 import numpy as np
 import onnx_ir as ir
@@ -6,11 +9,31 @@ from tqdm import tqdm
 
 from onnx_quantize.core._algorithms.rtn import _rtn_quantize
 from onnx_quantize.core._algorithms.utils import _dequantize_array
-from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy
+from onnx_quantize.core._qconfig import (
+    PreProcessingConfig,
+    QConfig,
+    QuantizationStrategy,
+    register_preprocessing_config,
+)
 
 
 logger = logging.getLogger(__name__)
 _SUPPORTED_OPS = {"MatMul", "Gemm"}
+
+
+@register_preprocessing_config
+class AwqConfig(PreProcessingConfig):
+    """AwqConfig is the configuration class handling all the AWQ parameters.
+
+    Args:
+        clip_search (bool, optional): Whether to perform clip value search. Defaults to False.
+    """
+
+    preprocessing_type: Literal["awq"] = "awq"
+    clip_search: bool = False
+
+    def build_pass(self, qconfig: QConfig) -> ir.passes.InPlacePass:
+        return AwqPass(clip_search=self.clip_search, target_op_types=qconfig.target_op_types)
 
 
 # TODO: add folding of mul nodes
