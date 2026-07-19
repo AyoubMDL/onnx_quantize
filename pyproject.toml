@@ -9,7 +9,7 @@ description = "ONNX Quantization Framework"
 authors = [{ name = "Ayoub Bih", email = "ayoubbih119@gmail.com" }]
 requires-python = ">=3.10"
 
-dependencies = ["onnxscript==0.7.0", "pydantic>=2.0", "tqdm", "ml_dtypes"]
+dependencies = ["onnxscript", "pydantic>=2.0", "tqdm", "ml_dtypes"]
 
 [project.optional-dependencies]
 cpu = ["onnxruntime"]
