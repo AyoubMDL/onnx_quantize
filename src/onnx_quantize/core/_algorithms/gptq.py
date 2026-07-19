@@ -1,8 +1,9 @@
-__all__ = ["_gptq_quantize"]
+__all__ = ["GPTQConfig", "_gptq_quantize"]
 
 import copy
 import logging
 import math
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import numpy as np
 
@@ -13,10 +14,63 @@ from onnx_quantize.core._algorithms.utils import (
     _quantize_array_from_qparams,
 )
 from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._qconfig import QuantizationStrategy
+from onnx_quantize.core._qconfig import (
+    AlgorithmConfig,
+    QuantizationStrategy,
+    register_algorithm_config,
+)
+
+
+if TYPE_CHECKING:
+    import onnx_ir as ir
+
+    from onnx_quantize.core._qconfig import QConfig
 
 
 logger = logging.getLogger(__name__)
+
+
+@register_algorithm_config
+class GPTQConfig(AlgorithmConfig):
+    """GPTQConfig is the configuration class handling all the GPTQ quantization parameters.
+
+    Args:
+        block_size (int, optional): GPTQ block size. Defaults to 128.
+        percdamp (float, optional): GPTQ percent of damping. Defaults to 0.01.
+        actorder (bool, optional): GPTQ activation order. Defaults to False.
+    """
+
+    # GPTQ builds a Hessian from input activations, so it needs calibration data.
+    requires_calibration: ClassVar[bool] = True
+
+    algorithm_type: Literal["gptq"] = "gptq"
+    block_size: int = 128
+    percdamp: float = 0.01
+    actorder: bool = False
+
+    def quantize_weights(
+        self, w: "ir.Value", qconfig: "QConfig", out: "ir.Value | None" = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        assert out is not None, "Output value is required for GPTQ quantization."
+        node = out.producer()
+        assert "input" in node.meta, "GPTQ requires calibration data in node meta."
+
+        return _gptq_quantize(
+            w.const_value.numpy(),
+            node.meta["input"],
+            quant_type=qconfig.weights.dtype,
+            strategy=qconfig.weights.strategy,
+            is_symmetric=qconfig.weights.symmetric,
+            reduce_range=qconfig.weights.reduce_range,
+            clip_ratio=qconfig.weights.clip_ratio,
+            block_size=self.block_size,
+            percdamp=self.percdamp,
+            group_size=qconfig.weights.group_size,
+            actorder=self.actorder,
+            mse=qconfig.weights.mse,
+            scale_dtype=qconfig.weights.scale_dtype,
+            zp_dtype=qconfig.weights.zp_dtype,
+        )
 
 
 def _gptq(
