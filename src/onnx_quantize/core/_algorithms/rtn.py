@@ -1,5 +1,6 @@
-__all__ = ["_rtn_quantize"]
+__all__ = ["RTNConfig", "_rtn_quantize"]
 
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -10,7 +11,44 @@ from onnx_quantize.core._algorithms.utils import (
     _quantize_array_from_qparams,
 )
 from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._qconfig import QuantizationStrategy
+from onnx_quantize.core._qconfig import (
+    AlgorithmConfig,
+    QuantizationStrategy,
+    register_algorithm_config,
+)
+
+
+if TYPE_CHECKING:
+    import onnx_ir as ir
+
+    from onnx_quantize.core._qconfig import QConfig
+
+
+@register_algorithm_config
+class RTNConfig(AlgorithmConfig):
+    """RTNConfig configures round-to-nearest (RTN) weight quantization.
+
+    RTN is the default weight-quantization algorithm. It has no extra parameters and
+    relies solely on the settings carried by :class:`QWeightArgs`.
+    """
+
+    algorithm_type: Literal["rtn"] = "rtn"
+
+    def quantize_weights(
+        self, w: "ir.Value", qconfig: "QConfig", out: "ir.Value | None" = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        return _rtn_quantize(
+            w.const_value.numpy(),
+            qconfig.weights.dtype,
+            strategy=qconfig.weights.strategy,
+            group_size=qconfig.weights.group_size,
+            is_symmetric=qconfig.weights.symmetric,
+            reduce_range=qconfig.weights.reduce_range,
+            clip_ratio=qconfig.weights.clip_ratio,
+            mse=qconfig.weights.mse,
+            scale_dtype=qconfig.weights.scale_dtype,
+            zp_dtype=qconfig.weights.zp_dtype,
+        )
 
 
 def _rtn_quantize(

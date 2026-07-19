@@ -3,9 +3,8 @@ import logging
 import numpy as np
 import onnx_ir as ir
 
-from onnx_quantize.core._algorithms import _gptq_quantize, _hqq_quantize, _rtn_quantize
 from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._qconfig import GPTQConfig, HqqConfig, QConfig, QuantizationStrategy
+from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy
 
 
 logger = logging.getLogger(__name__)
@@ -28,64 +27,6 @@ def _resolve_group_size(w: ir.Value, group_size: int) -> int:
             group_size = in_channels
 
     return group_size
-
-
-def _quantize_weights_gptq(w: ir.Value, inputs: np.ndarray, qconfig: QConfig):
-    w_q, w_scale, w_zero_point = _gptq_quantize(
-        w.const_value.numpy(),
-        inputs,
-        quant_type=qconfig.weights.dtype,
-        strategy=qconfig.weights.strategy,
-        is_symmetric=qconfig.weights.symmetric,
-        reduce_range=qconfig.weights.reduce_range,
-        clip_ratio=qconfig.weights.clip_ratio,
-        block_size=qconfig.weights.algorithm.block_size,
-        percdamp=qconfig.weights.algorithm.percdamp,
-        group_size=qconfig.weights.group_size,
-        actorder=qconfig.weights.algorithm.actorder,
-        mse=qconfig.weights.mse,
-        scale_dtype=qconfig.weights.scale_dtype,
-        zp_dtype=qconfig.weights.zp_dtype,
-    )
-
-    return w_q, w_scale, w_zero_point
-
-
-def _quantize_weights_rtn(w: ir.Value, qconfig: QConfig):
-    w_q, w_scale, w_zero_point = _rtn_quantize(
-        w.const_value.numpy(),
-        qconfig.weights.dtype,
-        strategy=qconfig.weights.strategy,
-        group_size=qconfig.weights.group_size,
-        is_symmetric=qconfig.weights.symmetric,
-        reduce_range=qconfig.weights.reduce_range,
-        clip_ratio=qconfig.weights.clip_ratio,
-        mse=qconfig.weights.mse,
-        scale_dtype=qconfig.weights.scale_dtype,
-        zp_dtype=qconfig.weights.zp_dtype,
-    )
-
-    return w_q, w_scale, w_zero_point
-
-
-def _quantize_weights_hqq(w: ir.Value, qconfig: QConfig):
-    w_q, w_scale, w_zero_point = _hqq_quantize(
-        w.const_value.numpy(),
-        quant_type=qconfig.weights.dtype,
-        group_size=qconfig.weights.group_size,
-        reduce_range=qconfig.weights.reduce_range,
-        clip_ratio=qconfig.weights.clip_ratio,
-        mse=qconfig.weights.mse,
-        scale_dtype=qconfig.weights.scale_dtype,
-        zp_dtype=qconfig.weights.zp_dtype,
-        lp_norm=qconfig.weights.algorithm.lp_norm,
-        beta=qconfig.weights.algorithm.beta,
-        kappa=qconfig.weights.algorithm.kappa,
-        iters=qconfig.weights.algorithm.iters,
-        early_stop=qconfig.weights.algorithm.early_stop,
-    )
-
-    return w_q, w_scale, w_zero_point
 
 
 def is_matmul_nbits_compatible(qconfig: QConfig, name: str = "") -> bool:
@@ -189,17 +130,7 @@ def quantize_weights(
     out: ir.Value | None = None,
     is_matmul_nbits_compatible: bool = False,
 ) -> tuple[ir.Value, ir.Value, ir.Value]:
-    if isinstance(qconfig.weights.algorithm, GPTQConfig):
-        assert out is not None, "Output value is required for GPTQ quantization."
-        node = out.producer()
-        assert "input" in node.meta, "GPTQ requires calibration data in node meta."
-        w_q, w_scale, w_zero_point = _quantize_weights_gptq(w, node.meta["input"], qconfig)
-
-    elif isinstance(qconfig.weights.algorithm, HqqConfig):
-        w_q, w_scale, w_zero_point = _quantize_weights_hqq(w, qconfig)
-
-    else:
-        w_q, w_scale, w_zero_point = _quantize_weights_rtn(w, qconfig)
+    w_q, w_scale, w_zero_point = qconfig.weights.algorithm.quantize_weights(w, qconfig, out=out)
 
     # Prepare quantized weights, scales, and zero points if qconfig is compatible with MatMulNBits
     if is_matmul_nbits_compatible:
