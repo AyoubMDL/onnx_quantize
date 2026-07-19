@@ -3,12 +3,24 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from enum import Enum
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    field_validator,
+    model_validator,
+)
 
 from onnx_quantize.core._calibration.base import CalibrationParams
 from onnx_quantize.core._dtypes import QuantType
+
+
+if TYPE_CHECKING:
+    import onnx_ir as ir
 
 
 logger = logging.getLogger(__name__)
@@ -31,84 +43,128 @@ class QFormat(str, Enum):
     QLINEAR = "qlinear"
 
 
-class GPTQConfig(BaseModel):
-    """GPTQConfig is the configuration class handling all the GPTQ quantization parameters.
+class AlgorithmConfig(BaseModel):
+    """Base class for weight-quantization algorithm configurations.
 
-    Args:
-        block_size (int, optional): GPTQ block size. Defaults to 128.
-        percdamp (float, optional): GPTQ percent of damping. Defaults to 0.01.
-        actorder (bool, optional): GPTQ activation order. Defaults to False.
+    Subclass this to add a new weight-quantization algorithm. A subclass lives
+    entirely in its own module (next to its quantization kernel) and plugs into the
+    pipeline without any change to this core configuration code:
+
+    * declare an ``algorithm_type`` ``Literal`` field whose default is the tag used
+      to reconstruct the config from a serialized ``QConfig``,
+    * decorate the class with :func:`register_algorithm_config`,
+    * set the ``requires_calibration`` class variable to ``True`` when the algorithm
+      needs input activations,
+    * implement :meth:`quantize_weights`, and
+    * optionally override :meth:`validate_weight_args` to enforce extra constraints.
     """
 
-    block_size: int = 128
-    percdamp: float = 0.01
-    actorder: bool = False
+    # Whether the algorithm needs input activations to be collected during calibration.
+    requires_calibration: ClassVar[bool] = False
+
+    def validate_weight_args(self, weight_args: QWeightArgs) -> None:
+        """Validate/adjust the enclosing ``QWeightArgs``. No-op by default."""
+
+    def quantize_weights(
+        self, w: ir.Value, qconfig: QConfig, out: ir.Value | None = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Quantize weight tensor ``w`` and return ``(q_weight, scale, zero_point)``."""
+        raise NotImplementedError(f"{type(self).__name__} must implement quantize_weights().")
 
 
-class HqqConfig(BaseModel):
-    """HqqConfig is the configuration class handling all the HQQ quantization parameters.
+class PreProcessingConfig(BaseModel):
+    """Base class for pre-processing configurations.
 
-    Args:
-        lp_norm (float, optional): The Lp norm to use for optimization. Defaults to 0.7.
-        beta (float, optional): The beta parameter for the shrinkage operator. Defaults to 10.0.
-        kappa (float, optional): The kappa parameter for the optimization. Defaults to 1.01.
-        iters (int, optional): The number of iterations for optimization. Defaults to 20.
-        early_stop (bool, optional): Whether to use early stopping in optimization.
-            Defaults to True.
+    Subclass this to add a new pre-processing pass. A subclass lives entirely in its
+    own module (next to its pass implementation) and plugs into the pipeline without
+    any change to this core configuration code:
+
+    * declare a ``preprocessing_type`` ``Literal`` field whose default is the tag used
+      to reconstruct the config from a serialized ``QConfig``,
+    * decorate the class with :func:`register_preprocessing_config`,
+    * set the ``requires_calibration`` / ``requires_post_calibration`` class variables
+      as appropriate, and
+    * implement :meth:`build_pass`.
     """
 
-    lp_norm: float = 0.7
-    beta: float = 1e1
-    kappa: float = 1.01
-    iters: int = 20
-    early_stop: bool = True
+    # Whether the pre-processing needs input activations collected during calibration.
+    requires_calibration: ClassVar[bool] = True
+    # Whether the model must be re-calibrated after this pre-processing runs.
+    requires_post_calibration: ClassVar[bool] = True
 
-    @staticmethod
-    def check_hqq_constraints(
-        dtype: QuantType, symmetric: bool, strategy: QuantizationStrategy, group_size: int
-    ) -> bool:
-        if dtype != QuantType.QUInt4:
-            raise ValueError(f"HQQ only supports uint4 weight type. Found: {np.dtype}")
+    def build_pass(self, qconfig: QConfig) -> ir.passes.InPlacePass:
+        """Build the IR pass that applies this pre-processing."""
+        raise NotImplementedError(f"{type(self).__name__} must implement build_pass().")
 
-        if symmetric:
-            raise ValueError("HQQ only supports asymmetric quantization.")
 
-        # TODO: Maybe merge these with is_matmul_nbits_compatible
-        if strategy != QuantizationStrategy.GROUP:
-            # Because HQQ can only be used with MatMulNBits which expects groups
-            raise ValueError(f"HQQ only supports 'group' quantization strategy. Found: {strategy}")
+_ALGORITHM_REGISTRY: dict[str, type[AlgorithmConfig]] = {}
+_PREPROCESSING_REGISTRY: dict[str, type[PreProcessingConfig]] = {}
 
-        if group_size != -1 and (group_size < 16 or (group_size & (group_size - 1)) != 0):
+
+def register_algorithm_config(cls: type[AlgorithmConfig]) -> type[AlgorithmConfig]:
+    """Register an :class:`AlgorithmConfig` subclass under its ``algorithm_type`` tag."""
+    field = cls.model_fields.get("algorithm_type")
+    if field is None:
+        raise TypeError(f"{cls.__name__} must declare an 'algorithm_type' field to be registered.")
+    _ALGORITHM_REGISTRY[field.default] = cls
+    return cls
+
+
+def register_preprocessing_config(cls: type[PreProcessingConfig]) -> type[PreProcessingConfig]:
+    """Register a :class:`PreProcessingConfig` subclass under its ``preprocessing_type`` tag."""
+    field = cls.model_fields.get("preprocessing_type")
+    if field is None:
+        raise TypeError(
+            f"{cls.__name__} must declare a 'preprocessing_type' field to be registered."
+        )
+    _PREPROCESSING_REGISTRY[field.default] = cls
+    return cls
+
+
+def _default_algorithm_config() -> AlgorithmConfig:
+    """Return the default weight-quantization algorithm (round-to-nearest)."""
+    from onnx_quantize.core._algorithms.rtn import RTNConfig
+
+    return RTNConfig()
+
+
+def _resolve_algorithm_config(value):
+    """Coerce a raw value into a concrete :class:`AlgorithmConfig` instance.
+
+    ``None`` becomes the default algorithm, instances pass through untouched, and a
+    mapping is dispatched to the registered subclass via its ``algorithm_type`` tag
+    (used when reconstructing a ``QConfig`` from serialized node metadata).
+    """
+    if value is None:
+        return _default_algorithm_config()
+    if isinstance(value, AlgorithmConfig):
+        return value
+    if isinstance(value, dict):
+        tag = value.get("algorithm_type")
+        if tag not in _ALGORITHM_REGISTRY:
             raise ValueError(
-                f"HQQ requires group_size to be greater than 16 and a power of 2. "
-                f"Found: {group_size}"
+                f"Unknown algorithm_type {tag!r}. Registered: {sorted(_ALGORITHM_REGISTRY)}"
             )
+        return _ALGORITHM_REGISTRY[tag](**value)
+    return value
 
 
-class SmoothQuantConfig(BaseModel):
-    """SmoothQuantConfig is the configuration class handling all the SmoothQuant parameters.
+def _resolve_preprocessing_config(value):
+    """Coerce a raw value into a concrete :class:`PreProcessingConfig` instance.
 
-    Args:
-        alpha (float, optional): The alpha parameter for SmoothQuant. Defaults to 0.5.
-            This parameter controls how much difficulty we want to migrate from
-            input_tensors to weights.
+    Instances pass through untouched; a mapping is dispatched to the registered
+    subclass via its ``preprocessing_type`` tag.
     """
-
-    alpha: float = 0.5
-
-
-class AwqConfig(BaseModel):
-    """AwqConfig is the configuration class handling all the AWQ parameters.
-
-    Args:
-        clip_search (bool, optional): Whether to perform clip value search. Defaults to False.
-    """
-
-    clip_search: bool = False
-
-
-AlgorithmConfig = GPTQConfig | HqqConfig | None
-PreProcessingConfig = SmoothQuantConfig | AwqConfig | None
+    if isinstance(value, PreProcessingConfig):
+        return value
+    if isinstance(value, dict):
+        tag = value.get("preprocessing_type")
+        if tag not in _PREPROCESSING_REGISTRY:
+            raise ValueError(
+                f"Unknown preprocessing_type {tag!r}. Registered: {sorted(_PREPROCESSING_REGISTRY)}"
+            )
+        return _PREPROCESSING_REGISTRY[tag](**value)
+    return value
 
 
 class _BaseArgs(BaseModel):
@@ -219,13 +275,17 @@ class QWeightArgs(_BaseArgs):
         clip_ratio (float, optional): Ratio for clipping weights before quantization.
             Defaults to 1.0.
         mse (bool, optional): Whether to use MSE-based quantization. Defaults to False.
-        algorithm (AlgorithmConfig | None, optional): Algorithm-specific configuration.
-            Defaults to None.
+        algorithm (AlgorithmConfig, optional): Weight-quantization algorithm configuration.
+            ``None`` is coerced to the default round-to-nearest ``RTNConfig``.
     """
 
     clip_ratio: float = 1.0
     mse: bool = False
-    algorithm: AlgorithmConfig | None = None
+    algorithm: SerializeAsAny[AlgorithmConfig] = Field(default_factory=_default_algorithm_config)
+
+    @field_validator("algorithm", mode="before")
+    def validate_algorithm(cls, value):
+        return _resolve_algorithm_config(value)
 
     @field_validator("clip_ratio", mode="after")
     def validate_clip_ratio(cls, value) -> float:
@@ -235,13 +295,8 @@ class QWeightArgs(_BaseArgs):
 
     @model_validator(mode="after")
     def validate_model_after(self: QWeightArgs) -> QWeightArgs:
-        if isinstance(self.algorithm, HqqConfig):
-            HqqConfig.check_hqq_constraints(
-                self.dtype, self.symmetric, self.strategy, self.group_size
-            )
-
-            # For Hqq, scale and zp dtypes are the same
-            self.zp_dtype = self.scale_dtype
+        # Algorithms plug their own constraints/adjustments in via this hook.
+        self.algorithm.validate_weight_args(self)
 
         return super().validate_model_after()
 
@@ -318,7 +373,7 @@ class QConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     # Preprocessors
-    preprocessors: Sequence[PreProcessingConfig] = Field(default_factory=tuple)
+    preprocessors: Sequence[SerializeAsAny[PreProcessingConfig]] = Field(default_factory=tuple)
 
     # Patterns of node names to skip from quantization
     ignore: Sequence[str] = Field(default_factory=tuple)
@@ -335,6 +390,14 @@ class QConfig(BaseModel):
         if isinstance(value, str):
             value = (value,)
         return tuple(value)
+
+    @field_validator("preprocessors", mode="before")
+    def validate_preprocessors(cls, value) -> Sequence[PreProcessingConfig]:
+        # Coerce each entry to its concrete config (dispatching mappings via the
+        # registry) so subtypes survive the QConfig -> node-metadata round-trip.
+        if value is None:
+            return ()
+        return tuple(_resolve_preprocessing_config(item) for item in value)
 
     @field_validator("format", mode="before")
     def validate_format(cls, value) -> QFormat:
