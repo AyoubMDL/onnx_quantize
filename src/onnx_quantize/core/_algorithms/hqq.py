@@ -1,4 +1,6 @@
-__all__ = ["_hqq_quantize"]
+__all__ = ["HqqConfig", "_hqq_quantize"]
+
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -8,7 +10,89 @@ from onnx_quantize.core._algorithms.utils import (
     _preprocess_array,
 )
 from onnx_quantize.core._dtypes import QuantType
-from onnx_quantize.core._qconfig import QuantizationStrategy
+from onnx_quantize.core._qconfig import (
+    AlgorithmConfig,
+    QuantizationStrategy,
+    register_algorithm_config,
+)
+
+
+if TYPE_CHECKING:
+    import onnx_ir as ir
+
+    from onnx_quantize.core._qconfig import QConfig, QWeightArgs
+
+
+@register_algorithm_config
+class HqqConfig(AlgorithmConfig):
+    """HqqConfig is the configuration class handling all the HQQ quantization parameters.
+
+    Args:
+        lp_norm (float, optional): The Lp norm to use for optimization. Defaults to 0.7.
+        beta (float, optional): The beta parameter for the shrinkage operator. Defaults to 10.0.
+        kappa (float, optional): The kappa parameter for the optimization. Defaults to 1.01.
+        iters (int, optional): The number of iterations for optimization. Defaults to 20.
+        early_stop (bool, optional): Whether to use early stopping in optimization.
+            Defaults to True.
+    """
+
+    algorithm_type: Literal["hqq"] = "hqq"
+    lp_norm: float = 0.7
+    beta: float = 1e1
+    kappa: float = 1.01
+    iters: int = 20
+    early_stop: bool = True
+
+    @staticmethod
+    def _check_hqq_constraints(
+        dtype: QuantType, symmetric: bool, strategy: QuantizationStrategy, group_size: int
+    ) -> bool:
+        if dtype != QuantType.QUInt4:
+            raise ValueError(f"HQQ only supports uint4 weight type. Found: {np.dtype}")
+
+        if symmetric:
+            raise ValueError("HQQ only supports asymmetric quantization.")
+
+        # TODO: Maybe merge these with is_matmul_nbits_compatible
+        if strategy != QuantizationStrategy.GROUP:
+            # Because HQQ can only be used with MatMulNBits which expects groups
+            raise ValueError(f"HQQ only supports 'group' quantization strategy. Found: {strategy}")
+
+        if group_size != -1 and (group_size < 16 or (group_size & (group_size - 1)) != 0):
+            raise ValueError(
+                f"HQQ requires group_size to be greater than 16 and a power of 2. "
+                f"Found: {group_size}"
+            )
+
+    def validate_weight_args(self, weight_args: "QWeightArgs") -> None:
+        self._check_hqq_constraints(
+            weight_args.dtype,
+            weight_args.symmetric,
+            weight_args.strategy,
+            weight_args.group_size,
+        )
+
+        # For HQQ, scale and zp dtypes are the same
+        weight_args.zp_dtype = weight_args.scale_dtype
+
+    def quantize_weights(
+        self, w: "ir.Value", qconfig: "QConfig", out: "ir.Value | None" = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        return _hqq_quantize(
+            w.const_value.numpy(),
+            quant_type=qconfig.weights.dtype,
+            group_size=qconfig.weights.group_size,
+            reduce_range=qconfig.weights.reduce_range,
+            clip_ratio=qconfig.weights.clip_ratio,
+            mse=qconfig.weights.mse,
+            scale_dtype=qconfig.weights.scale_dtype,
+            zp_dtype=qconfig.weights.zp_dtype,
+            lp_norm=self.lp_norm,
+            beta=self.beta,
+            kappa=self.kappa,
+            iters=self.iters,
+            early_stop=self.early_stop,
+        )
 
 
 def _relu(x: np.ndarray) -> np.ndarray:
