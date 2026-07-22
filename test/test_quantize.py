@@ -81,6 +81,27 @@ def _get_matmul_add_model(rng):
     return model
 
 
+def _get_shared_activation_model(rng):
+    # A node's output (h) is the input of two downstream quantized nodes (Y1, Y2).
+    # The shared activation must not produce colliding qparam initializers.
+    model = onnx.parser.parse_model("""
+                < ir_version: 10, opset_import: ["" : 21] >
+                test_model (float[N, 32] X) => (float[N, ?] Y1, float[N, ?] Y2)
+                <float[32, 64] W0, float[64, 128] W1, float[64, 128] W2>
+                {
+                    h = MatMul(X, W0)
+                    Y1 = MatMul(h, W1)
+                    Y2 = MatMul(h, W2)
+                }
+            """)
+    W0 = onnx.numpy_helper.from_array(_truncated_normal(rng, (32, 64)), name="W0")
+    W1 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W1")
+    W2 = onnx.numpy_helper.from_array(_truncated_normal(rng, (64, 128)), name="W2")
+    model.graph.initializer.extend([W0, W1, W2])
+    onnx.checker.check_model(model, full_check=True)
+    return model
+
+
 def _test_quantize(rng, model, qconfig, calibration_data=None):
     """Helper function to test quantization on a model."""
     # Convert to IR if needed
@@ -248,7 +269,10 @@ def test_quantize_weights_outputs(rng, model_fn, is_static, dtype):
     ],
 )
 @pytest.mark.parametrize("symmetric", [True, False])
-@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model, _get_matmul_add_model])
+@pytest.mark.parametrize(
+    "model_fn",
+    [_get_matmul_model, _get_gemm_model, _get_matmul_add_model, _get_shared_activation_model],
+)
 def test_quantize_weights_inputs_outputs(rng, model_fn, is_static, dtype, symmetric):
     model = model_fn(rng)
     calibration_data = _truncated_normal(rng, (2, 32)) if is_static else None
@@ -276,7 +300,10 @@ def test_quantize_weights_inputs_outputs(rng, model_fn, is_static, dtype, symmet
 @pytest.mark.parametrize("dtype", [QuantType.QInt8, QuantType.QUInt8])
 @pytest.mark.parametrize("strategy", ["tensor", "channel"])
 @pytest.mark.parametrize("symmetric", [True, False])
-@pytest.mark.parametrize("model_fn", [_get_matmul_model, _get_gemm_model, _get_matmul_add_model])
+@pytest.mark.parametrize(
+    "model_fn",
+    [_get_matmul_model, _get_gemm_model, _get_matmul_add_model, _get_shared_activation_model],
+)
 def test_quantize_weights_inputs_outputs_qlinear_format(rng, model_fn, dtype, symmetric, strategy):
     model = model_fn(rng)
     calibration_data = _truncated_normal(rng, (2, 32))

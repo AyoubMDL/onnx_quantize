@@ -1,3 +1,4 @@
+import onnx_ir as ir
 import onnxscript
 
 from onnx_quantize.core._qconfig import QConfig
@@ -10,6 +11,33 @@ class QRewriter(onnxscript.rewriter.RewriteRuleClassBase):
 
     def qfunction(self, op_type: str, qconfig: QConfig):
         return get_qfunction(op_type, qconfig)
+
+    def _get_activation_qparams(self, op, node, kind, qconfig_act):
+        """Return ``(scale, zero_point)`` initializers for a static activation.
+
+        Returns ``(None, None)`` when the activation is not statically quantized.
+
+        Args:
+            op: The rewriter tape used to create the initializers.
+            node: The original node being rewritten; its unique output name keys the
+                qparam initializers.
+            kind: ``"input"`` or ``"output"`` -- selects the calibrated qparams stored
+                in ``node.meta`` under ``f"{kind}_scale"`` / ``f"{kind}_zero_point"``.
+            qconfig_act: Activation quantization config, or ``None`` when absent.
+        """
+        if qconfig_act is None or not qconfig_act.is_static:
+            return None, None
+
+        # Name qparams after this node's (unique) output so a tensor that fans out to
+        # several quantized nodes yields distinct initializers instead of colliding.
+        prefix = node.outputs[0].name
+        scale = op.initializer(
+            ir.tensor(node.meta[f"{kind}_scale"]), name=f"{prefix}/{kind}/scale"
+        )
+        zero_point = op.initializer(
+            ir.tensor(node.meta[f"{kind}_zero_point"]), name=f"{prefix}/{kind}/zero_point"
+        )
+        return scale, zero_point
 
     def _rewrite_weights_only(self, op, *args, qconfig):
         raise NotImplementedError()

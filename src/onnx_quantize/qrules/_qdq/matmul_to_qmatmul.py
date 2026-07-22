@@ -1,7 +1,5 @@
 """MatMul to QMatMul rewriter using QDQ pattern."""
 
-import enum
-
 import onnx_ir as ir
 import onnxscript
 
@@ -9,11 +7,6 @@ from onnx_quantize.core._qconfig import QConfig, QuantizationStrategy
 from onnx_quantize.qfunctions import MS_OPSET, QUANT_OPSET
 from onnx_quantize.qrules._common import is_matmul_nbits_compatible, quantize_weights
 from onnx_quantize.qrules.base import QRewriter
-
-
-class _ActivationKind(enum.Enum):
-    INPUT = "input"
-    OUTPUT = "output"
 
 
 class MatMulToQMatMul(QRewriter):
@@ -42,24 +35,6 @@ class MatMulToQMatMul(QRewriter):
         if ir.convenience.get_const_tensor(w) is None:
             return check_result.fail("Weight is not a constant tensor.")
         return check_result
-
-    def _get_activation_qparams(self, op, node, kind, qconfig_act):
-        if qconfig_act is None or not qconfig_act.is_static:
-            return None, None
-
-        # Add a prefix to the initializer name to ensure uniqueness
-        prefix = node.inputs[0].name if kind == _ActivationKind.INPUT else node.outputs[0].name
-
-        # Extract calibrated scale and zero_point from node metadata
-        scale_key = f"{kind.value}_scale"
-        zp_key = f"{kind.value}_zero_point"
-
-        scale = op.initializer(ir.tensor(node.meta[scale_key]), name=f"{prefix}_{kind.value}/scale")
-        zero_point = op.initializer(
-            ir.tensor(node.meta[zp_key]), name=f"{prefix}_{kind.value}/zero_point"
-        )
-
-        return scale, zero_point
 
     def _rewrite_weights_only_standard(self, op, x, w, out, qconfig: QConfig):
         qfunc_name = self.qfunction(self.op_type, qconfig).__name__
@@ -134,10 +109,10 @@ class MatMulToQMatMul(QRewriter):
 
         # 2: Get activation quantization parameters
         input_scale, input_zero_point = self._get_activation_qparams(
-            op, node, _ActivationKind.INPUT, qconfig.input_activations
+            op, node, "input", qconfig.input_activations
         )
         out_scale, out_zero_point = self._get_activation_qparams(
-            op, node, _ActivationKind.OUTPUT, qconfig.output_activations
+            op, node, "output", qconfig.output_activations
         )
 
         # 3: Build argument list based on what's needed

@@ -28,19 +28,6 @@ class MatMulToQLinearMatMul(QRewriter):
             return check_result.fail("Weight is not a constant tensor.")
         return check_result
 
-    def _get_activation_qparams(self, op, node, prefix, qconfig_act):
-        if qconfig_act is None or not qconfig_act.is_static:
-            return None, None
-
-        # Extract calibrated scale and zero_point from node metadata
-        scale_key = f"{prefix}_scale"
-        zp_key = f"{prefix}_zero_point"
-
-        scale = op.initializer(ir.tensor(node.meta[scale_key]), name=f"{prefix}/scale")
-        zero_point = op.initializer(ir.tensor(node.meta[zp_key]), name=f"{prefix}/zero_point")
-
-        return scale, zero_point
-
     def _rewrite_static(self, op, x, w, out, qconfig: QConfig):
         assert qconfig.format == QFormat.QLINEAR
         node = out.producer()
